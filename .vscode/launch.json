@@ -1,0 +1,35 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python Debugger: Current File",
+            "type": "debugpy",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "env": {
+                "XLA_PYTHON_CLIENT_MEM_FRACTION": "0.9",
+                "HF_ENDPOINT": "https://hf-mirror.com",
+                "HF_LEROBOT_HOME": "/mnt/model/.cache/huggingface/hub/",
+                "HF_HOME": "/mnt/model/.cache/huggingface/hub/",
+            },
+            "args": [
+                "pi05_flexiv_pick", "--exp-name=my_experiment_flexiv", "--overwrite"
+            ]
+            // "args": [
+            //     "preprocess_data/configs/debug.yaml",
+            //     "flexiv/pick_dolls_debug",
+            // ]
+            // "args": [
+            //     "--config-name", "pi05_flexiv_pick"
+            // ],
+            // "args": [
+            //     // "pi05_libero", "--exp-name=my_experiment", "--overwrite"
+            //     "--config-name", "pi05_libero"
+            // ]
+        }
+    ]
+}
