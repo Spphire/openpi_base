@@ -1,5 +1,6 @@
 # TODO
 - 增加模型推理可视化脚本和ground truth的对比
+- 推理pipeline接入SuperInference
 
 # 说明
 
