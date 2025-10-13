@@ -19,6 +19,7 @@ episode_data['actions'] = state[1:,:] - state[:-1,:]
 ```
 
 **动作空间**：state_{t+1} - state_{t} -> delta动作空间
+
 **观测空间**：
  - state为左右臂末端位姿和抓夹的拼接, i.e., proprio
  - 图像为左右臂，无三方视图
