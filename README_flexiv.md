@@ -26,6 +26,9 @@ episode_data['actions'] = state[1:,:] - state[:-1,:]
  - 图像为左右臂，无三方视图
 
 # Usage
+0. 安装
+按照README.md安装
+
 1. 数据转换：
 ```shell
 python preprocess_data/h5_to_lerobot.py CONFIG_PATH REPO_NAME --fps FPS --robot_type ROBOT_NAME
