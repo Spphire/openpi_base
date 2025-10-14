@@ -16,20 +16,21 @@
                 "HF_LEROBOT_HOME": "/mnt/model/.cache/huggingface/hub/",
                 "HF_HOME": "/mnt/model/.cache/huggingface/hub/",
             },
-            "args": [
-                "pi05_flexiv_pick", "--exp-name=my_experiment_flexiv", "--overwrite"
-            ]
-            // "args": [
+            
+            "args": [ //visualize args
+                "-cfg", "pi05_flexiv_pick", "-ckpt", "/mnt/model/openpi/checkpoints/pi05_flexiv_pick/my_experiment_flexiv/18000",
+                "--output-dir", "real_data_output"
+            ],
+            // "args": [ //training args
+            //     "pi05_flexiv_pick", "--exp-name=my_experiment_flexiv", "--overwrite"
+            // ]
+            // "args": [ //data convert args
             //     "preprocess_data/configs/debug.yaml",
             //     "flexiv/pick_dolls_debug",
             // ]
-            // "args": [
+            // "args": [ //computing norm args
             //     "--config-name", "pi05_flexiv_pick"
             // ],
-            // "args": [
-            //     // "pi05_libero", "--exp-name=my_experiment", "--overwrite"
-            //     "--config-name", "pi05_libero"
-            // ]
         }
     ]
 }
