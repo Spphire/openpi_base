@@ -30,6 +30,7 @@ episode_data['actions'] = state[1:,:] - state[:-1,:]
 # Usage
 0. 安装
 按照README.md安装
+注：由于服务器是阿里云服务器，需要在每条安装命令前加上UV_INDEX_URL=https://mirrors.aliyun.com/pypi/simple 来加速
 
 1. 数据转换：
 ```shell
