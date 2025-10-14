@@ -2,7 +2,7 @@
 - 增加模型推理可视化脚本和ground truth的对比
 - 推理pipeline接入SuperInference
 - 测试policy server的功能
-- 训练过程中加入推理可视化脚本
+- 训练过程中加入推理可视化记录
 
 # 说明
 
