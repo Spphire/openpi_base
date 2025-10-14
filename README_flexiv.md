@@ -112,3 +112,8 @@ python scripts/compute_norm_stats.py --config-name pi05_flexiv_pick # 跟trainin
 ```shell
 python scripts/train.py pi05_flexiv_pick --exp-name=EXP_NAME --overwrite # pi05_flexiv_pick可以被替换成其他定义好的training config
 ```
+
+5. 可视化训练结果
+```shell
+python visualize_inference -cfg pi05_flexiv_pick -ckpt CKPT_PATH --output-dir OURPUT_DIR # pi05_flexiv_pick可以被替换成其他定义好的training config
+```
