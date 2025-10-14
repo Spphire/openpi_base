@@ -36,7 +36,7 @@ from tqdm import tqdm
 # ---------- helpers ----------------------------------------------------------
 def pos_rot_to_mat(pos, rot):
     shape = pos.shape[:-1]
-    mat = np.zeros(shape + (4, 4), dtype=pos.dtype)
+    mat = np.zeros((*shape, 4, 4), dtype=pos.dtype)
     mat[..., :3, 3] = pos
     mat[..., :3, :3] = rot.as_matrix()
     mat[..., 3, 3] = 1
@@ -533,7 +533,7 @@ class Converter:
             print(f"Total episodes processed: {self.anomaly_stats['total_episodes']}")
             print(f"Episodes with anomalies: {self.anomaly_stats['episodes_with_anomalies']}")
             print(
-                f"Anomaly rate: {self.anomaly_stats['episodes_with_anomalies']/max(1, self.anomaly_stats['total_episodes'])*100:.1f}%"
+                f"Anomaly rate: {self.anomaly_stats['episodes_with_anomalies'] / max(1, self.anomaly_stats['total_episodes']) * 100:.1f}%"
             )
             print(f"Total zero frames detected: {self.anomaly_stats['total_zero_frames']}")
             print(f"Total jump frames detected: {self.anomaly_stats['total_jump_frames']}")
