@@ -2,7 +2,7 @@
 - ~~增加模型推理可视化脚本和ground truth的对比~~ ✔
 - 推理pipeline接入SuperInference
 - 测试policy server的功能
-- 训练过程中加入推理可视化记录 
+- 训练过程中加入推理可视化记录 ✔
 - ~~确认抓夹的归一化方式，以及抓夹是否使用delta: 抓夹用的绝对动作，应该在数据预处理阶段避免对它的delta计算~~ ✔ 
 - ~~加入zarr转lerobot数据集~~ ✔
 ```python

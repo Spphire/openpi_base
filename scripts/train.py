@@ -26,6 +26,7 @@ import openpi.training.optimizer as _optimizer
 import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
+from openpi.training.trajectory_visualizer import maybe_save_training_trajectories
 
 
 def init_logging():
@@ -267,6 +268,17 @@ def main(config: _config.TrainConfig):
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
             infos = []
+        
+        # Maybe save trajectory visualizations (minimal overhead when not saving)
+        observation, actions = batch
+        model = nnx.merge(train_state.model_def, train_state.params)
+        traj_metrics = maybe_save_training_trajectories(
+            step, model, train_rng, observation, actions, str(config.checkpoint_dir),
+            save_interval=getattr(config, "plot_interval", 5000)
+        )
+        if traj_metrics:  # Only log if we actually computed metrics
+            wandb.log(traj_metrics, step=step)
+        
         batch = next(data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:

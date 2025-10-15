@@ -17,17 +17,17 @@
                 "HF_HOME": "/mnt/model/.cache/huggingface/hub/",
             },
             
-            // "args": [ //visualize args
-            //     "-cfg", "pi05_pick1010all", "-ckpt", "/mnt/model/Codes/openpi/checkpoints/pi05_pick1010all/exp_pi05_1010_all/5000",
-            //     "--output-dir", "abs_data_output"
-            // ],
+            "args": [ //visualize args
+                "-cfg", "pi05_pick1010all", "-ckpt", "/mnt/model/Codes/openpi/checkpoints/pi05_pick1010all/exp_pi05_1010_all/10000",
+                "--output-dir", "abs_data_output_1w"
+            ],
             // "args": [ //training args
             //     "pi05_flexiv_pick", "--exp-name=my_experiment_flexiv", "--overwrite"
             // ]
-            "args": [ //data convert args
-                "preprocess_data/configs/debug_zarr.yaml",
-                "flexiv/pick_1014",
-            ]
+            // "args": [ //data convert args
+            //     "preprocess_data/configs/debug_zarr.yaml",
+            //     "flexiv/pick_1014",
+            // ]
             // "args": [ //computing norm args
             //     "--config-name", "pi05_flexiv_pick"
             // ],
