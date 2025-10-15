@@ -495,7 +495,9 @@ class Converter:
                         axis=1,
                     ).astype(np.float32)
                     episode_data["state"] = state[:-1, :]
+                    # process delta pos and abs gripper width
                     episode_data["actions"] = state[1:, :] - state[:-1, :]
+                    episode_data["actions"][:, [6, 13]] = state[1:, [6,13]] # abs gripper width
                     episode_data["task"] = task
                     for step in range(num_frames):
                         frame_dict = {feat: episode_data[feat][step] for feat in self.features}

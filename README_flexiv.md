@@ -1,9 +1,24 @@
 # TODO
-- 增加模型推理可视化脚本和ground truth的对比
+- ~~增加模型推理可视化脚本和ground truth的对比~~ ✔
 - 推理pipeline接入SuperInference
 - 测试policy server的功能
-- 训练过程中加入推理可视化记录
+- 训练过程中加入推理可视化记录 
+- 确认抓夹的归一化方式，以及抓夹是否使用delta: 抓夹用的绝对动作，应该在数据预处理阶段避免对它的delta计算 ✔ 
+```python
+# class LeRobotLiberoDataConfig
+# One additional data transform: pi0 models are trained on delta actions (relative to the first
+# state in each action chunk). IF your data has ``absolute`` actions (e.g. target joint angles)
+# you can uncomment the following line to convert the actions to delta actions. The only exception
+# is for the gripper actions which are always absolute.
+# In the example below, we would apply the delta conversion to the first 6 actions (joints) and
+# leave the 7th action (gripper) unchanged, i.e. absolute.
+# In Libero, the raw actions in the dataset are already delta actions, so we *do not* need to
+# apply a separate delta conversion (that's why it's commented out). Choose whether to apply this
+# transform based on whether your dataset uses ``absolute`` or ``delta`` actions out of the box.
 
+# LIBERO already represents actions as deltas, but we have some old Pi0 checkpoints that are trained with this
+# extra delta transform.
+```
 # 说明
 
 ## 数据格式
@@ -18,10 +33,40 @@ state = np.concatenate(
     episode_data['robot1_eef_rot_axis_angle'],
     episode_data['robot1_gripper_width']], axis=1).astype(np.float32)
 episode_data['state'] = state[:-1,:]
-episode_data['actions'] = state[1:,:] - state[:-1,:]
+episode_data["actions"] = state[1:, :] # directly use the next state as the action, will be converted to delta action in src/openpi/training/config.py: LeRobotBimanualFlexivDataConfig: line 253
+
+"""
+> LeRobotBimanualFlexivDataConfig: line 253
+    if self.extra_delta_transform: # default is True
+        delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+        data_transforms = data_transforms.push(
+            inputs=[_transforms.DeltaActions(delta_action_mask)],
+            outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+        )
+> DeltaActions: 
+    @dataclasses.dataclass(frozen=True)
+    class DeltaActions(DataTransformFn):
+        # Repacks absolute actions into delta action space.
+
+        # Boolean mask for the action dimensions to be repacked into delta action space. Length
+        # can be smaller than the actual number of dimensions. If None, this transform is a no-op.
+        # See `make_bool_mask` for more details.
+        mask: Sequence[bool] | None
+
+        def __call__(self, data: DataDict) -> DataDict:
+            if "actions" not in data or self.mask is None:
+                return data
+            state, actions = data["state"], data["actions"]
+            mask = np.asarray(self.mask)
+            dims = mask.shape[-1]
+            actions[..., :dims] -= np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2)
+            data["actions"] = actions
+            return data
+"""
+
 ```
 
-**动作空间**：state_{t+1} - state_{t} -> delta动作空间
+**动作空间**：abs_pos[t+1:t+chunk_size+1] - abs_pos[t]
 
 **观测空间**：
  - state为左右臂末端位姿和抓夹的拼接, i.e., proprio
@@ -34,10 +79,10 @@ episode_data['actions'] = state[1:,:] - state[:-1,:]
 
 1. 数据转换：
 ```shell
-python preprocess_data/h5_to_lerobot.py CONFIG_PATH REPO_NAME --fps FPS --robot_type ROBOT_NAME
+python preprocess_data/h5_to_lerobot_abs.py CONFIG_PATH REPO_NAME --fps FPS --robot_type ROBOT_NAME
 
 # Example
-python preprocess_data/h5_to_lerobot.py preprocess_data/configs/debug.yaml flexiv/pick_dolls_debug --fps 25 --robot_type bimanual_flexiv
+python preprocess_data/h5_to_lerobot_abs.py preprocess_data/configs/debug.yaml flexiv/pick_dolls_debug --fps 25 --robot_type bimanual_flexiv
 ```
 
 2. 编写配置文件
@@ -80,13 +125,14 @@ _CONFIGS = [
     ...,
     # 新增加的training config
     TrainConfig(
-        name="pi05_flexiv_pick",
+        name="pi05_flexiv_pick", # (1) 设置训练config名称
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
         data=LeRobotBimanualFlexivDataConfig(
-            repo_id="flexiv/pick_dolls_debug",
+            repo_id="flexiv/pick_dolls_debug", # (2) 这里改转换的数据集名称
             base_config=DataConfig(prompt_from_task=False),
+            extra_delta_transform=True, # (3) 若是用新的数据转换脚本生成的数据preprocess_data/h5_to_lerobot_abs.py，则置True；默认为True
         ),
-        batch_size=64,
+        batch_size=64, # (4) 设置训练参数\权重\最大训练步数
         lr_schedule=_optimizer.CosineDecaySchedule(
             warmup_steps=10_000,
             peak_lr=5e-5,
@@ -95,9 +141,9 @@ _CONFIGS = [
         ),
         optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
         ema_decay=0.999,
-        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"), 
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
-        num_train_steps=30_000,
+        num_train_steps=30_000, 
     ),
     ...
 ```

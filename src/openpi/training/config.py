@@ -227,6 +227,9 @@ class SimpleDataConfig(DataConfigFactory):
 
 @dataclasses.dataclass(frozen=True)
 class LeRobotBimanualFlexivDataConfig(DataConfigFactory):
+
+    extra_delta_transform: bool = True
+
     @override
     def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig, *args, **kwargs) -> DataConfig:
         repack_transform = _transforms.Group(
@@ -247,6 +250,12 @@ class LeRobotBimanualFlexivDataConfig(DataConfigFactory):
             outputs=[bimanual_flexiv_policy.BimanualFlexivOutputs()],
         )
         model_transforms = ModelTransformFactory()(model_config)
+        if self.extra_delta_transform:
+            delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.DeltaActions(delta_action_mask)],
+                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+            )
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
             repack_transforms=repack_transform,
@@ -584,11 +593,33 @@ _CONFIGS = [
     # Inference Aloha configs.
     #
     TrainConfig(
-        name="pi05_flexiv_pick",
+        name="pi05_pick1010all",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        data=LeRobotBimanualFlexivDataConfig(
+            repo_id="flexiv/pick_1010all", # change name here
+            base_config=DataConfig(prompt_from_task=False),
+            extra_delta_transform=True,
+        ),
+        batch_size=64,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_flexiv_pick_from_old_processing",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
         data=LeRobotBimanualFlexivDataConfig(
             repo_id="flexiv/pick_dolls_debug",
             base_config=DataConfig(prompt_from_task=False),
+            extra_delta_transform=False,
         ),
         batch_size=64,
         lr_schedule=_optimizer.CosineDecaySchedule(
