@@ -225,6 +225,7 @@ def extract_episode_files(hdf5_info):
         valid_lines = [lines[idx] for idx in valid_index]
         valid_feats = [info["feat"] for _ in range(len(valid_files))]
         valid_tasks = [info.get("task", "") for _ in range(len(valid_files))]
+        if valid_tasks[0]=="": raise ValueError("task is empty")
         # Extract mask information if available
         valid_masks = [info.get("masks", {}) for _ in range(len(valid_files))]
         all_valid_files.extend(valid_files)

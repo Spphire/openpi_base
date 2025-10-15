@@ -1,0 +1,21 @@
+data:
+  - "/mnt/model/dsl_data/umi_1014/dataset.zarr.zip"
+task:
+  - "pick the wooden block and the blue box to the dark area"
+features:
+  left_wrist_image:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  right_wrist_image: 
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  state:
+    dtype: "float32"
+    shape: [14,] 
+    names: ["state"]
+  actions:
+    dtype: "float32"
+    shape: [14,]
+    names: ["actions"]
