@@ -225,6 +225,7 @@ def extract_episode_files(hdf5_info):
         valid_lines = [lines[idx] for idx in valid_index]
         valid_feats = [info["feat"] for _ in range(len(valid_files))]
         valid_tasks = [info.get("task", "") for _ in range(len(valid_files))]
+        if valid_tasks[0]=="": raise ValueError("task is empty")
         # Extract mask information if available
         valid_masks = [info.get("masks", {}) for _ in range(len(valid_files))]
         all_valid_files.extend(valid_files)
@@ -495,9 +496,11 @@ class Converter:
                         axis=1,
                     ).astype(np.float32)
                     episode_data["state"] = state[:-1, :]
-                    # process delta pos and abs gripper width
-                    episode_data["actions"] = state[1:, :] - state[:-1, :]
-                    episode_data["actions"][:, [6, 13]] = state[1:, [6,13]] # abs gripper width
+                    episode_data["prev_state"] = np.concatenate([state[:1,:], state[:-2, :]], axis=0)
+                    assert episode_data["state"].shape[0]==episode_data["prev_state"].shape[0]
+                    #############################################################################################
+                    episode_data["actions"] = state[1:, :] # directly use the next state as the action
+                    #############################################################################################
                     episode_data["task"] = task
                     for step in range(num_frames):
                         frame_dict = {feat: episode_data[feat][step] for feat in self.features}

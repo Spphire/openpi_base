@@ -82,6 +82,8 @@ class Converter:
                     ).astype(np.float32)
                     num_frames = state.shape[0] - 1
                     episode_data["state"] = state[:-1, :]
+                    episode_data["prev_state"] = np.concatenate([state[:1,:], state[:-2, :]], axis=0)
+                    assert episode_data["state"].shape[0]==episode_data["prev_state"].shape[0]
                     episode_data["left_wrist_image"] = episode_data['camera0_rgb'][:-1, :]
                     episode_data["right_wrist_image"] = episode_data['camera1_rgb'][:-1, :]
                     #############################################################################################

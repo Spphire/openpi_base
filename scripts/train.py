@@ -255,7 +255,9 @@ def main(config: _config.TrainConfig):
         total=config.num_train_steps,
         dynamic_ncols=True,
     )
-
+    #### This line is only for visualization ####
+    use_quantiles = [t for t in data_loader._data_loader._data_loader.dataset._transform.transforms if 'norm' in str(t.__class__).lower()][0].use_quantiles
+    #################################
     infos = []
     for step in pbar:
         with sharding.set_mesh(mesh):
@@ -272,13 +274,12 @@ def main(config: _config.TrainConfig):
         # Maybe save trajectory visualizations (minimal overhead when not saving)
         observation, actions = batch
         model = nnx.merge(train_state.model_def, train_state.params)
+        ####### Visualization only for bimanual flexiv #######
         traj_metrics = maybe_save_training_trajectories(
             step, model, train_rng, observation, actions, str(config.checkpoint_dir),
-            save_interval=getattr(config, "plot_interval", 5000)
+            save_interval=getattr(config, "plot_interval", 5000), norm_stats_dict=dict(assets_dirs=config.assets_dirs, asset_id=config.data.repo_id, use_quantiles=use_quantiles)
         )
-        if traj_metrics:  # Only log if we actually computed metrics
-            wandb.log(traj_metrics, step=step)
-        
+        #####################################################
         batch = next(data_iter)
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:

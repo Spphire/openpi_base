@@ -239,6 +239,7 @@ class LeRobotBimanualFlexivDataConfig(DataConfigFactory):
                         "observation/left_wrist_image": "left_wrist_image",
                         "observation/right_wrist_image": "right_wrist_image",
                         "observation/state": "state",
+                        "observation/prev_state": "prev_state",
                         "actions": "actions",
                         "prompt": "task",
                     }
@@ -253,8 +254,8 @@ class LeRobotBimanualFlexivDataConfig(DataConfigFactory):
         if self.extra_delta_transform:
             delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
             data_transforms = data_transforms.push(
-                inputs=[_transforms.DeltaActions(delta_action_mask)],
-                outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+                inputs=[_transforms.UmiDeltaStateAndActions(delta_action_mask)], # Use UmiDeltaStateAndActions to convert state and actions to delta state and actions space
+                outputs=[_transforms.UmiAbsoluteActions(delta_action_mask)], # Use UmiAbsoluteActions to convert delta state and actions space to absolute state and actions space
             )
         return dataclasses.replace(
             self.create_base_config(assets_dirs, model_config),
@@ -594,6 +595,27 @@ _CONFIGS = [
     #
     # Inference Aloha configs.
     #
+        TrainConfig(
+        name="pi05_umi_1010all_server",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=40, discrete_state_input=False),
+        data=LeRobotBimanualFlexivDataConfig(
+            repo_id="flexiv/umi_1010all_server", # change name here
+            base_config=DataConfig(prompt_from_task=False),
+            extra_delta_transform=True,
+        ),
+        batch_size=64,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
     TrainConfig(
         name="pi05_pick1010all",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),

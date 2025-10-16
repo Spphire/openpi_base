@@ -1,27 +1,15 @@
 # TODO
+- 修正state的定义：因为机器拿到的state和训练集state定义不一样。根据diffusion policy中把state转到了relative pose，因此在该框架中需要把state转为上一次的delta 动作；
 - ~~增加模型推理可视化脚本和ground truth的对比~~ ✔
 - 推理pipeline接入SuperInference 
 - ~~训练过程中加入推理可视化记录~~ ✔
 - ~~确认抓夹的归一化方式，以及抓夹是否使用delta: 抓夹用的绝对动作，应该在数据预处理阶段避免对它的delta计算~~ ✔ 
 - ~~加入zarr转lerobot数据集~~ ✔
-```python
-# class LeRobotLiberoDataConfig
-# One additional data transform: pi0 models are trained on delta actions (relative to the first
-# state in each action chunk). IF your data has ``absolute`` actions (e.g. target joint angles)
-# you can uncomment the following line to convert the actions to delta actions. The only exception
-# is for the gripper actions which are always absolute.
-# In the example below, we would apply the delta conversion to the first 6 actions (joints) and
-# leave the 7th action (gripper) unchanged, i.e. absolute.
-# In Libero, the raw actions in the dataset are already delta actions, so we *do not* need to
-# apply a separate delta conversion (that's why it's commented out). Choose whether to apply this
-# transform based on whether your dataset uses ``absolute`` or ``delta`` actions out of the box.
 
-# LIBERO already represents actions as deltas, but we have some old Pi0 checkpoints that are trained with this
-# extra delta transform.
-```
 # 说明
 
 ## 数据格式
+### zarr\hdf5 -> lerobot
 ```python
 episode_data['left_wrist_image'] = img_left[:-1,:]
 episode_data['right_wrist_image'] = img_right[:-1,:]
@@ -33,43 +21,99 @@ state = np.concatenate(
     episode_data['robot1_eef_rot_axis_angle'],
     episode_data['robot1_gripper_width']], axis=1).astype(np.float32)
 episode_data['state'] = state[:-1,:]
-episode_data["actions"] = state[1:, :] # directly use the next state as the action, will be converted to delta action in src/openpi/training/config.py: LeRobotBimanualFlexivDataConfig: line 253
+episode_data['prev_state'] = episode_data["prev_state"] = np.concatenate([state[:1,:], state[:-2, :]], axis=0) # repeat the first state once as the previous states
+episode_data["actions"] = state[1:, :] # directly use the next state as the action, will be converted to `delta action` and `delta state` in src/openpi/training/config.py: LeRobotBimanualFlexivDataConfig: line 253
+```
 
-"""
-> LeRobotBimanualFlexivDataConfig: line 253
-    if self.extra_delta_transform: # default is True
-        delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
-        data_transforms = data_transforms.push(
-            inputs=[_transforms.DeltaActions(delta_action_mask)],
-            outputs=[_transforms.AbsoluteActions(delta_action_mask)],
+### lerobot -> Model Input\Output
+```python
+@dataclasses.dataclass(frozen=True)
+class LeRobotBimanualFlexivDataConfig(DataConfigFactory):
+    extra_delta_transform: bool = True
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig, *args, **kwargs) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/left_wrist_image": "left_wrist_image",
+                        "observation/right_wrist_image": "right_wrist_image",
+                        "observation/state": "state",
+                        "observation/prev_state": "prev_state", # This line is different from other data sources (e.g., libero, droid), which is necessary for umi-based actions
+                        "actions": "actions",
+                        "prompt": "task",
+                    }
+                )
+            ]
         )
-> DeltaActions: 
-    @dataclasses.dataclass(frozen=True)
-    class DeltaActions(DataTransformFn):
-        # Repacks absolute actions into delta action space.
+        data_transforms = _transforms.Group(
+            inputs=[bimanual_flexiv_policy.BimanualFlexivInputs(model_type=model_config.model_type)], # Valid for both training and inference
+            outputs=[bimanual_flexiv_policy.BimanualFlexivOutputs()], # Only valid for inference
+        )
+        model_transforms = ModelTransformFactory()(model_config)
+        if self.extra_delta_transform:
+            delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.UmiDeltaStateAndActions(delta_action_mask)], # Use UmiDeltaStateAndActions to convert state and actions to delta state and actions space
+                outputs=[_transforms.UmiAbsoluteActions(delta_action_mask)], # Use UmiAbsoluteActions to convert delta state and actions space to absolute state and actions space
+            )
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
+        
+@dataclasses.dataclass(frozen=True)
+class UmiDeltaStateAndActions(DataTransformFn):
+    """Repacks absolute state and actions into delta state and actions space."""
 
-        # Boolean mask for the action dimensions to be repacked into delta action space. Length
-        # can be smaller than the actual number of dimensions. If None, this transform is a no-op.
-        # See `make_bool_mask` for more details.
-        mask: Sequence[bool] | None
+    # Boolean mask for the action dimensions to be repacked into delta action space. Length
+    # can be smaller than the actual number of dimensions. If None, this transform is a no-op.
+    # See `make_bool_mask` for more details.
+    mask: Sequence[bool] | None
 
-        def __call__(self, data: DataDict) -> DataDict:
-            if "actions" not in data or self.mask is None:
-                return data
-            state, actions = data["state"], data["actions"]
-            mask = np.asarray(self.mask)
-            dims = mask.shape[-1]
-            actions[..., :dims] -= np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2)
-            data["actions"] = actions
+    def __call__(self, data: DataDict) -> DataDict:
+        if self.mask is None: return data
+        mask = np.asarray(self.mask)
+        dims = mask.shape[-1]
+        state, prev_state = data["state"], data["prev_state"]
+        if "actions" not in data: 
+            data["state"][:dims] = state - np.where(mask, prev_state[:dims], 0)
             return data
-"""
+        actions = data["actions"]
+        actions[..., :dims] -= np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2)
+        data["actions"] = actions
+        data["state"][:dims] = state - np.where(mask, prev_state[:dims], 0)
+        return data
 
+
+@dataclasses.dataclass(frozen=True)
+class UmiAbsoluteActions(DataTransformFn):
+    """Repacks delta actions into absolute action space."""
+
+    # Boolean mask for the action dimensions to be repacked into absolute action space. Length
+    # can be smaller than the actual number of dimensions. If None, this transform is a no-op.
+    # See `make_bool_mask` for more details.
+    mask: Sequence[bool] | None
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if "actions" not in data or self.mask is None:
+            return data
+        state, actions, prev_state = data["state"], data["actions"], data["prev_state"]
+        mask = np.asarray(self.mask)
+        dims = mask.shape[-1]
+        state[:dims] += np.where(mask, prev_state[:dims], 0) # state_{t} = [state_{t} - state_{t-1}] + state_{t-1} w.r.t., the term [state_{t} - state_{t-1}] corresponds to codes in UmiDeltaStateAndActions
+        actions[..., :dims] += np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2) # action_{t+k} = action_{t+k} + s{t}
+        data["actions"] = actions
+        return data # return action in the absolute space
 ```
 
 **动作空间**：abs_pos[t+1:t+chunk_size+1] - abs_pos[t]
 
 **观测空间**：
- - state为左右臂末端位姿和抓夹的拼接, i.e., proprio
+ ~~- state为左右臂末端位姿和抓夹的拼接, i.e., proprio~~
+ - state：每一帧位姿直接减去上一帧位姿s_{pos, t} = pos_{t}-pos_{t-1}，抓夹宽度保持使用绝对值 s_{gripper, t} = gripper_width_{t}；
  - 图像为左右臂，无三方视图
 
 # Usage
@@ -87,13 +131,13 @@ numcodecs==0.11.0
 ```shell
 # 注意1：转换的数据集会被存到环境变量HF_LEROBOT_HOME对应的路径下，若不存在，则默认为~/.cache/huggingface/lerobot
 # 注意2：config中要写清楚task
-python preprocess_data/h5_to_lerobot_abs.py CONFIG_PATH REPO_NAME --fps FPS --robot_type ROBOT_NAME
+python preprocess_data/h5_to_lerobot.py CONFIG_PATH REPO_NAME --fps FPS --robot_type ROBOT_NAME
 
 # Example from h5
-python preprocess_data/h5_to_lerobot_abs.py preprocess_data/configs/debug.yaml flexiv/pick_dolls_debug --fps 25 --robot_type bimanual_flexiv
+python preprocess_data/h5_to_lerobot.py preprocess_data/configs/debug.yaml flexiv/pick_dolls_debug --fps 25 --robot_type bimanual_flexiv
 
 # Example from zarr
-python preprocess_data/zarr_to_lerobot_abs.py preprocess_data/configs/debug_zarr.yaml flexiv/pick_1014 --fps 25 --robot_type bimanual_flexiv
+python preprocess_data/zarr_to_lerobot.py preprocess_data/configs/debug_zarr.yaml flexiv/pick_1014 --fps 25 --robot_type bimanual_flexiv
 ```
 
 2. 编写配置文件
@@ -145,10 +189,10 @@ _CONFIGS = [
     ...,
     # 新增加的training config
     TrainConfig(
-        name="pi05_pick1010all",
-        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False),
+        name="pi05_pick1010all", # change config name here
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False), # change chunk size here
         data=LeRobotBimanualFlexivDataConfig(
-            repo_id="flexiv/pick_1010all", # change name here
+            repo_id="flexiv/pick_1010all", # change dataset name here
             base_config=DataConfig(prompt_from_task=False),
             extra_delta_transform=True,
         ),
@@ -181,10 +225,10 @@ python scripts/train.py pi05_pick1010all --exp-name=EXP_NAME --overwrite # pi05_
 
 5. 可视化训练结果
 ```shell
-python visualize_inference -cfg pi05_pick1010all -ckpt CKPT_PATH --output-dir OURPUT_DIR # pi05_flexiv_pick可以被替换成其他定义好的training config
+python model_inference_visualization/visualize_inference.py -cfg pi05_pick1010all -ckpt CKPT_PATH --output-dir OURPUT_DIR # pi05_flexiv_pick可以被替换成其他定义好的training config
 ```
 
 6. 训练中断resume
 ```shell
-python scripts/train.py pi05_pick1010all --exp-name=exp_pi05_1010_all --resume
+python scripts/train.py pi05_pick1010all --exp-name=exp_pi05_1010_all --resume # config名称和实验名称保持相同
 ```

@@ -221,6 +221,49 @@ class DeltaActions(DataTransformFn):
 
         return data
 
+@dataclasses.dataclass(frozen=True)
+class UmiDeltaStateAndActions(DataTransformFn):
+    """Repacks absolute state and actions into delta state and actions space."""
+
+    # Boolean mask for the action dimensions to be repacked into delta action space. Length
+    # can be smaller than the actual number of dimensions. If None, this transform is a no-op.
+    # See `make_bool_mask` for more details.
+    mask: Sequence[bool] | None
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if self.mask is None: return data
+        mask = np.asarray(self.mask)
+        dims = mask.shape[-1]
+        state, prev_state = data["state"], data["prev_state"]
+        if "actions" not in data: 
+            data["state"][:dims] = state - np.where(mask, prev_state[:dims], 0)
+            return data
+        actions = data["actions"]
+        actions[..., :dims] -= np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2)
+        data["actions"] = actions
+        data["state"][:dims] = state - np.where(mask, prev_state[:dims], 0)
+        return data
+
+
+@dataclasses.dataclass(frozen=True)
+class UmiAbsoluteActions(DataTransformFn):
+    """Repacks delta actions into absolute action space."""
+
+    # Boolean mask for the action dimensions to be repacked into absolute action space. Length
+    # can be smaller than the actual number of dimensions. If None, this transform is a no-op.
+    # See `make_bool_mask` for more details.
+    mask: Sequence[bool] | None
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if "actions" not in data or self.mask is None:
+            return data
+        state, actions, prev_state = data["state"], data["actions"], data["prev_state"]
+        mask = np.asarray(self.mask)
+        dims = mask.shape[-1]
+        state[:dims] += np.where(mask, prev_state[:dims], 0)
+        actions[..., :dims] += np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2)
+        data["actions"] = actions
+        return data
 
 @dataclasses.dataclass(frozen=True)
 class AbsoluteActions(DataTransformFn):

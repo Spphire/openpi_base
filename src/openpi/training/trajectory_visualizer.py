@@ -11,17 +11,18 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib
 matplotlib.use('Agg')  # Use non-interactive backend
-
+from openpi.training import checkpoints as _checkpoints
 import jax
 import jax.numpy as jnp
 import openpi.shared.array_typing as at
 import openpi.models.model as _model
-
+import logging
+import openpi.transforms as transforms
 
 class TrainingTrajectoryVisualizer:
     """Lightweight trajectory visualizer that saves to local files."""
     
-    def __init__(self, action_dim: int = 14, save_interval: int = 5000):
+    def __init__(self, action_dim: int = 14, save_interval: int = 5000, norm_stats_dict=None):
         """
         Initialize the training trajectory visualizer.
         
@@ -31,6 +32,13 @@ class TrainingTrajectoryVisualizer:
         """
         self.action_dim = action_dim
         self.save_interval = save_interval
+        self.norm_stats_dict = norm_stats_dict
+        if self.norm_stats_dict is not None:
+            norm_stats = _checkpoints.load_norm_stats(self.norm_stats_dict['assets_dirs'], self.norm_stats_dict['asset_id'])
+            self.unnormalizer = transforms.Unnormalize(norm_stats, use_quantiles=self.norm_stats_dict['use_quantiles'])
+        else:
+            self.unnormalizer = None
+            logging.warning("No norm stats path provided, not using norm stats for trajectory visualization")
         self.output_dir = None  # Will be set later by training script
         
         # Setup plotting style
@@ -82,15 +90,8 @@ class TrainingTrajectoryVisualizer:
             pred_rng = jax.random.fold_in(rng, 42)  # Use different RNG for prediction
             predicted_actions = model.sample_actions(pred_rng, observation)
             
-            # Extract initial state
-            initial_state = None
-            if hasattr(observation, 'state'):
-                initial_state = observation.state
-            elif hasattr(observation, 'robot_state'):
-                initial_state = observation.robot_state
-            
             # Save trajectories and return metrics
-            metrics = self.save_trajectories_to_files(step, actions, predicted_actions, initial_state)
+            metrics = self.save_trajectories_to_files(step, actions, predicted_actions)
             
             # Set back to train mode
             model.train()
@@ -108,9 +109,8 @@ class TrainingTrajectoryVisualizer:
     
     def create_trajectory_comparison_plot(
         self, 
-        gt_actions: at.Array, 
-        pred_actions: at.Array,
-        initial_state: Optional[at.Array] = None,
+        gt_actions: np.ndarray, 
+        pred_actions: np.ndarray,
         sample_idx: int = 0,
         max_samples: int = 3
     ) -> plt.Figure:
@@ -120,21 +120,15 @@ class TrainingTrajectoryVisualizer:
         Args:
             gt_actions: Ground truth actions [batch, horizon, action_dim]
             pred_actions: Predicted actions [batch, horizon, action_dim] 
-            initial_state: Initial state [batch, state_dim], optional
             sample_idx: Which sample to visualize
             max_samples: Maximum number of samples to show
             
         Returns:
             matplotlib Figure object
         """
-        # Convert to numpy arrays
-        if hasattr(gt_actions, 'device'):  # JAX array
-            gt_actions = np.array(gt_actions)
-        if hasattr(pred_actions, 'device'):  # JAX array
-            pred_actions = np.array(pred_actions)
-        if initial_state is not None and hasattr(initial_state, 'device'):
-            initial_state = np.array(initial_state)
-            
+        # Note: gt_actions and pred_actions should already be numpy arrays
+        # and unnormalized (if applicable) before calling this function
+        
         # Handle different shapes
         if gt_actions.ndim == 3:  # (batch, horizon, action_dim)
             batch_size = gt_actions.shape[0]
@@ -205,9 +199,8 @@ class TrainingTrajectoryVisualizer:
     
     def create_3d_trajectory_plot(
         self,
-        gt_actions: at.Array,
-        pred_actions: at.Array, 
-        initial_state: at.Array,
+        gt_actions: np.ndarray,
+        pred_actions: np.ndarray, 
         sample_idx: int = 0
     ) -> plt.Figure:
         """
@@ -216,19 +209,13 @@ class TrainingTrajectoryVisualizer:
         Args:
             gt_actions: Ground truth actions [batch, horizon, action_dim]
             pred_actions: Predicted actions [batch, horizon, action_dim]
-            initial_state: Initial state [batch, state_dim]
             sample_idx: Which sample to visualize
             
         Returns:
             matplotlib Figure object
         """
-        # Convert to numpy arrays
-        if hasattr(gt_actions, 'device'):  # JAX array
-            gt_actions = np.array(gt_actions)
-        if hasattr(pred_actions, 'device'):  # JAX array
-            pred_actions = np.array(pred_actions)
-        if hasattr(initial_state, 'device'):  # JAX array
-            initial_state = np.array(initial_state)
+        # Note: gt_actions and pred_actions should already be numpy arrays
+        # and unnormalized (if applicable) before calling this function
             
         # Handle batch dimension
         if gt_actions.ndim == 3:
@@ -236,7 +223,6 @@ class TrainingTrajectoryVisualizer:
         else:
             gt_actions = gt_actions[None, ...]
             pred_actions = pred_actions[None, ...]
-            initial_state = initial_state[None, ...]
             batch_size = 1
             
         sample_idx = min(sample_idx, batch_size - 1)
@@ -244,51 +230,35 @@ class TrainingTrajectoryVisualizer:
         # Extract sample data
         gt_sample = gt_actions[sample_idx]  # (horizon, action_dim)
         pred_sample = pred_actions[sample_idx]  # (horizon, action_dim)
-        init_state = initial_state[sample_idx]  # (state_dim,)
         
         # Truncate to action dimension
         if gt_sample.shape[-1] > self.action_dim:
             gt_sample = gt_sample[:, :self.action_dim]
         if pred_sample.shape[-1] > self.action_dim:
             pred_sample = pred_sample[:, :self.action_dim]
-        if init_state.shape[-1] > self.action_dim:
-            init_state = init_state[:self.action_dim]
             
         # Ensure same length
         min_len = min(len(gt_sample), len(pred_sample))
         gt_sample = gt_sample[:min_len]
         pred_sample = pred_sample[:min_len]
         
-        # Extract initial positions from state
-        # Format: first 7 dims for left hand, last 7 dims for right hand
-        left_hand_init_pos = init_state[:3]  # xyz for left hand
-        right_hand_init_pos = init_state[7:10]  # xyz for right hand
+        # Each hand: [x, y, z, rx, ry, rz, gripper_width]
         
         # Extract absolute positions from actions
-        # Format: first 7 dims for left hand, last 7 dims for right hand
-        gt_left_positions = gt_sample[:, :3]  # Left hand xyz positions
-        gt_right_positions = gt_sample[:, 7:10]  # Right hand xyz positions
+        # New action format: first 7 dims for left hand, last 7 dims for right hand
+        # Each hand action: [abs_x, abs_y, abs_z, abs_rx, abs_ry, abs_rz, abs_gripper_width]
+        # GT trajectories - actions are already absolute positions
+        gt_left_positions = gt_sample[:, :3]  # Left hand xyz absolute positions (first 3 of first 7)
+        gt_right_positions = gt_sample[:, 7:10]  # Right hand xyz absolute positions (first 3 of last 7)
         
-        pred_left_positions = pred_sample[:, :3]  # Left hand xyz positions
-        pred_right_positions = pred_sample[:, 7:10]  # Right hand xyz positions
+        # Predicted trajectories - actions are already absolute positions
+        pred_left_positions = pred_sample[:, :3]  # Left hand xyz absolute positions (first 3 of first 7)
+        pred_right_positions = pred_sample[:, 7:10]  # Right hand xyz absolute positions (first 3 of last 7)
         
-        # Create trajectory arrays including initial state
-        gt_left_trajectory = np.zeros((min_len + 1, 3))
-        gt_right_trajectory = np.zeros((min_len + 1, 3))
-        pred_left_trajectory = np.zeros((min_len + 1, 3))
-        pred_right_trajectory = np.zeros((min_len + 1, 3))
-        
-        # First point is the initial position from state
-        gt_left_trajectory[0] = left_hand_init_pos
-        gt_right_trajectory[0] = right_hand_init_pos
-        pred_left_trajectory[0] = left_hand_init_pos
-        pred_right_trajectory[0] = right_hand_init_pos
-        
-        # Subsequent points are the absolute positions from actions
-        gt_left_trajectory[1:min_len + 1] = gt_left_positions
-        gt_right_trajectory[1:min_len + 1] = gt_right_positions
-        pred_left_trajectory[1:min_len + 1] = pred_left_positions
-        pred_right_trajectory[1:min_len + 1] = pred_right_positions
+        gt_left_trajectory = gt_left_positions
+        gt_right_trajectory = gt_right_positions
+        pred_left_trajectory = pred_left_positions
+        pred_right_trajectory = pred_right_positions
         
         # Create 3D plot
         fig = plt.figure(figsize=(15, 5))
@@ -358,7 +328,6 @@ class TrainingTrajectoryVisualizer:
         step: int,
         gt_actions: at.Array,
         pred_actions: at.Array,
-        initial_state: Optional[at.Array] = None,
     ) -> Dict[str, float]:
         """
         Save trajectory visualizations to local files.
@@ -367,7 +336,6 @@ class TrainingTrajectoryVisualizer:
             step: Training step
             gt_actions: Ground truth actions
             pred_actions: Predicted actions  
-            initial_state: Initial state (optional)
             
         Returns:
             Dictionary of trajectory metrics
@@ -378,6 +346,28 @@ class TrainingTrajectoryVisualizer:
         metrics = {}
         
         try:
+            # Convert to numpy arrays
+            if hasattr(gt_actions, 'device'):  # JAX array
+                gt_actions = np.array(gt_actions)
+            if hasattr(pred_actions, 'device'):  # JAX array
+                pred_actions = np.array(pred_actions)
+
+
+            # Unnormalize actions if norm stats are provided
+            if self.unnormalizer is not None and self.unnormalizer.norm_stats is not None:
+                gt_actions = transforms.apply_tree(
+                    {"actions": gt_actions},
+                    self.unnormalizer.norm_stats,
+                    self.unnormalizer._unnormalize_quantile if self.unnormalizer.use_quantiles else self.unnormalizer._unnormalize,
+                    strict=False,
+                )["actions"]
+                pred_actions = transforms.apply_tree(
+                    {"actions": pred_actions},
+                    self.unnormalizer.norm_stats,
+                    self.unnormalizer._unnormalize_quantile if self.unnormalizer.use_quantiles else self.unnormalizer._unnormalize,
+                    strict=False,
+                )["actions"]
+
             # Compute trajectory metrics
             metrics = compute_trajectory_metrics(gt_actions, pred_actions)
             
@@ -387,20 +377,19 @@ class TrainingTrajectoryVisualizer:
             
             # Save trajectory comparison plot
             traj_fig = self.create_trajectory_comparison_plot(
-                gt_actions, pred_actions, initial_state, sample_idx=0
+                gt_actions, pred_actions, sample_idx=0
             )
             traj_path = step_dir / "trajectory_comparison.png"
             traj_fig.savefig(traj_path, dpi=150, bbox_inches='tight')
             plt.close(traj_fig)
             
-            # Save 3D trajectory plot if initial state is available
-            if initial_state is not None:
-                traj_3d_fig = self.create_3d_trajectory_plot(
-                    gt_actions, pred_actions, initial_state, sample_idx=0
-                )
-                traj_3d_path = step_dir / "3d_trajectories.png"
-                traj_3d_fig.savefig(traj_3d_path, dpi=150, bbox_inches='tight')
-                plt.close(traj_3d_fig)
+            # Save 3D trajectory plot 
+            traj_3d_fig = self.create_3d_trajectory_plot(
+                gt_actions, pred_actions, sample_idx=0
+            )
+            traj_3d_path = step_dir / "3d_trajectories.png"
+            traj_3d_fig.savefig(traj_3d_path, dpi=150, bbox_inches='tight')
+            plt.close(traj_3d_fig)
             
             # Save metrics to text file
             metrics_path = step_dir / "trajectory_metrics.txt"
@@ -419,8 +408,8 @@ class TrainingTrajectoryVisualizer:
 
 
 def compute_trajectory_metrics(
-    gt_actions: at.Array, 
-    pred_actions: at.Array
+    gt_actions: at.Array | np.ndarray, 
+    pred_actions: at.Array | np.ndarray
 ) -> Dict[str, float]:
     """
     Compute trajectory comparison metrics.
@@ -478,12 +467,13 @@ def compute_trajectory_metrics(
 _global_trajectory_visualizer = None
 
 
-def initialize_trajectory_visualizer(action_dim: int = 14, save_interval: int = 1000):
+def initialize_trajectory_visualizer(action_dim: int = 14, save_interval: int = 1000, norm_stats_dict=None):
     """Initialize the global trajectory visualizer."""
     global _global_trajectory_visualizer
     _global_trajectory_visualizer = TrainingTrajectoryVisualizer(
         action_dim=action_dim,
-        save_interval=save_interval
+        save_interval=save_interval,
+        norm_stats_dict=norm_stats_dict,
     )
 
 
@@ -494,7 +484,8 @@ def maybe_save_training_trajectories(
     observation: Any,
     actions: Any,
     checkpoint_dir: Optional[str] = None,
-    save_interval: int = 1000
+    save_interval: int = 1000,
+    norm_stats_dict: Optional[dict] = None,
 ) -> Dict[str, float]:
     """
     Hook function to maybe save trajectory visualizations during training.
@@ -517,7 +508,7 @@ def maybe_save_training_trajectories(
     
     if _global_trajectory_visualizer is None:
         # Initialize with default parameters if not already initialized
-        initialize_trajectory_visualizer(save_interval=save_interval)
+        initialize_trajectory_visualizer(save_interval=save_interval, norm_stats_dict=norm_stats_dict)
     
     return _global_trajectory_visualizer.maybe_save_trajectories(
         step, model, rng, observation, actions, checkpoint_dir

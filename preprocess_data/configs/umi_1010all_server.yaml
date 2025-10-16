@@ -1,7 +1,7 @@
 data:
-  - "/mnt/model/dsl_data/umi_1014/dataset.zarr.zip"
+  - "/mnt/model/dsl_data/umi_1010all_server/dataset.zarr.zip"
 task:
-  - "pick the wooden block and the blue box to the dark area"
+  - "pick the green box and the blue box to the dark area"
 features:
   left_wrist_image:
     dtype: "image"

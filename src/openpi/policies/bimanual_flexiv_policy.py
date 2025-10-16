@@ -11,6 +11,7 @@ def make_bimanual_flexiv_example() -> dict:
     """Creates a random input example for the Libero policy."""
     return {
         "observation/state": np.random.rand(14),
+        "observation/prev_state": np.random.rand(14),
         "observation/left_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "observation/right_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "prompt": "do something",
@@ -46,6 +47,7 @@ class BimanualFlexivInputs(transforms.DataTransformFn):
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {
             "state": data["observation/state"],
+            "prev_state": data["observation/prev_state"],
             "image": {
                 "base_0_rgb": np.zeros_like(left_wrist_image),
                 "left_wrist_0_rgb": left_wrist_image,

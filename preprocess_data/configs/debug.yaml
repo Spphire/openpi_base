@@ -31,4 +31,7 @@ features:
     dtype: "float32"
     shape: [14,]
     names: ["actions"]
-  
+  prev_state:
+    dtype: "float32"
+    shape: [14,] 
+    names: ["prev_state"]

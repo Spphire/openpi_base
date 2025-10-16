@@ -53,9 +53,9 @@ class FlexivTrajectoryVisualizer:
         plt.style.use('seaborn-v0_8')
         sns.set_palette("husl")
         
-    def load_real_dataset_episodes(self, episode_id: int = 0, num_samples: int = 5) -> List[Dict]:
+    def load_real_dataset_samples(self, episode_id: int = 0, num_samples: int = 5) -> List[Dict]:
         """Load samples from a specific episode directly from LeRobot dataset."""
-        print(f"Loading episode {episode_id} with {num_samples} samples from LeRobot...")
+        print(f"Loading {num_samples} samples from episode {episode_id} from LeRobot...")
         
         try:
             # Import LeRobot dataset
@@ -96,7 +96,7 @@ class FlexivTrajectoryVisualizer:
             flexiv_inputs = bimanual_flexiv_policy.BimanualFlexivInputs(model_type=self.config.model.model_type)
             flexiv_outputs = bimanual_flexiv_policy.BimanualFlexivOutputs()
             
-            episodes = []
+            samples = []
             dataset_len = len(dataset)
             
             # Sample multiple samples from this episode
@@ -121,6 +121,7 @@ class FlexivTrajectoryVisualizer:
                         "observation/left_wrist_image": raw_data["left_wrist_image"],
                         "observation/right_wrist_image": raw_data["right_wrist_image"], 
                         "observation/state": raw_data["state"],
+                        "observation/prev_state": raw_data["prev_state"],
                         "actions": raw_data["actions"],
                         "prompt": raw_data.get("task", "pick up object")
                     }
@@ -128,12 +129,13 @@ class FlexivTrajectoryVisualizer:
                     # Apply BimanualFlexivInputs transform (this handles the format conversion)
                     transformed_data = flexiv_inputs(repacked_data)
                     
-                    # Extract the data for our episode format
-                    episode = {
-                        'episode_id': i,
+                    # Extract the data for our sample format
+                    sample = {
                         'sample_id': sample_idx,
+                        'sample_index_in_batch': i,
                         'episode_source_id': episode_id,
                         'state': transformed_data["state"],
+                        'prev_state': transformed_data["prev_state"],
                         'left_wrist_image': transformed_data["image"]["left_wrist_0_rgb"],
                         'right_wrist_image': transformed_data["image"]["right_wrist_0_rgb"],
                         'gt_actions': transformed_data["actions"],
@@ -141,15 +143,15 @@ class FlexivTrajectoryVisualizer:
                         'raw_data': raw_data
                     }
                     
-                    episodes.append(episode)
+                    samples.append(sample)
                     print(f"Loaded sample {i+1}/{len(sample_indices)} (dataset index: {sample_idx})")
                     
                 except Exception as e:
                     print(f"Failed to load sample {sample_idx}: {e}")
                     continue
                     
-            print(f"Successfully loaded {len(episodes)} samples from episode {episode_id}")
-            return episodes
+            print(f"Successfully loaded {len(samples)} samples from episode {episode_id}")
+            return samples
             
         except Exception as e:
             print(f"Failed to load real dataset: {e}")
@@ -157,37 +159,38 @@ class FlexivTrajectoryVisualizer:
             traceback.print_exc()
             raise RuntimeError(f"Could not load real dataset: {e}") from e
     
-    def create_dummy_episodes(self, num_episodes: int = 5) -> List[Dict]:
-        """Create dummy episodes for testing when real dataset is not available."""
-        episodes = []
+    def create_dummy_samples(self, num_samples: int = 5) -> List[Dict]:
+        """Create dummy samples for testing when real dataset is not available."""
+        samples = []
         
-        for i in range(num_episodes):
+        for i in range(num_samples):
             # Create base example
             example = bimanual_flexiv_policy.make_bimanual_flexiv_example()
             
-            episode = {
-                'episode_id': i,
+            sample = {
+                'sample_id': i,
                 'state': example["observation/state"],
                 'left_wrist_image': example["observation/left_wrist_image"],
                 'right_wrist_image': example["observation/right_wrist_image"],
                 'gt_actions': np.random.randn(self.config.model.action_horizon, 14) * 0.1,
                 'prompt': example["prompt"]
             }
-            episodes.append(episode)
+            samples.append(sample)
             
-        return episodes
+        return samples
     
-    def run_inference_on_episode(self, episode: Dict) -> Dict:
-        """Run inference on a single episode."""
+    def run_inference_on_sample(self, sample: Dict) -> Dict:
+        """Run inference on a single sample."""
         # Create input for inference
         obs_input = {
-            "observation/state": episode['state'],
-            "observation/left_wrist_image": episode['left_wrist_image'],
-            "observation/right_wrist_image": episode['right_wrist_image'],
-            "prompt": episode['prompt']
+            "observation/state": sample['state'],
+            "observation/prev_state": sample['prev_state'],
+            "observation/left_wrist_image": sample['left_wrist_image'],
+            "observation/right_wrist_image": sample['right_wrist_image'],
+            "prompt": sample['prompt']
         }
         
-        print(f"Running inference on episode {episode['episode_id']}...")
+        print(f"Running inference on sample {sample['sample_id']}...")
         
         try:
             result = self.policy.infer(obs_input)
@@ -201,7 +204,7 @@ class FlexivTrajectoryVisualizer:
             }
             
         except Exception as e:
-            print(f"Inference failed on episode {episode['episode_id']}: {e}")
+            print(f"Inference failed on sample {sample['sample_id']}: {e}")
             import traceback
             traceback.print_exc()
             
@@ -214,17 +217,17 @@ class FlexivTrajectoryVisualizer:
                 'error': str(e)
             }
     
-    def plot_trajectory_comparison(self, episode: Dict, inference_result: Dict, 
+    def plot_trajectory_comparison(self, sample: Dict, inference_result: Dict, 
                                  save_path: Optional[str] = None) -> None:
         """Plot comparison between ground truth and predicted trajectories."""
-        gt_actions = episode['gt_actions']
+        gt_actions = sample['gt_actions']
         pred_actions = inference_result['predicted_actions']
-        episode_id = episode['episode_id']
+        sample_id = sample['sample_id']
         
         # Handle different shapes of gt_actions and pred_actions
         if gt_actions.ndim == 3:  # (batch, horizon, action_dim)
             gt_actions = gt_actions.reshape(-1, gt_actions.shape[-1])
-        elif gt_actions.ndim == 2:  # (horizon, action_dim) - single episode
+        elif gt_actions.ndim == 2:  # (horizon, action_dim) - single sample
             pass
         
         # Determine the actual action dimension (flexiv uses 14 DOF)
@@ -291,7 +294,7 @@ class FlexivTrajectoryVisualizer:
             axes[i].set_visible(False)
             
         axes[-4].set_xlabel('Time Step')
-        plt.suptitle(f'Trajectory Comparison - Episode {episode_id}', fontsize=14, fontweight='bold')
+        plt.suptitle(f'Trajectory Comparison - Sample {sample_id}', fontsize=14, fontweight='bold')
         plt.tight_layout()
         
         if save_path:
@@ -301,12 +304,12 @@ class FlexivTrajectoryVisualizer:
             plt.show()
         plt.close()
     
-    def plot_action_horizon_comparison(self, episode: Dict, inference_result: Dict,
+    def plot_action_horizon_comparison(self, sample: Dict, inference_result: Dict,
                                      timestep: int = 0, save_path: Optional[str] = None) -> None:
         """Plot the full action horizon prediction vs ground truth at a specific timestep."""
-        gt_actions = episode['gt_actions']
+        gt_actions = sample['gt_actions']
         pred_actions = inference_result['predicted_actions']
-        episode_id = episode['episode_id']
+        sample_id = sample['sample_id']
         
         if timestep >= len(pred_actions):
             print(f"Timestep {timestep} not available")
@@ -360,7 +363,7 @@ class FlexivTrajectoryVisualizer:
             axes[i].set_visible(False)
             
         axes[-4].set_xlabel('Horizon Step')
-        plt.suptitle(f'Action Horizon at Timestep {timestep} - Episode {episode_id}', 
+        plt.suptitle(f'Action Horizon at Timestep {timestep} - Sample {sample_id}', 
                     fontsize=14, fontweight='bold')
         plt.tight_layout()
         
@@ -371,11 +374,11 @@ class FlexivTrajectoryVisualizer:
             plt.show()
         plt.close()
     
-    def plot_images_sequence(self, episode: Dict, save_path: Optional[str] = None) -> None:
+    def plot_images_sequence(self, sample: Dict, save_path: Optional[str] = None) -> None:
         """Plot input images."""
-        left_image = episode['left_wrist_image']
-        right_image = episode['right_wrist_image']
-        episode_id = episode['episode_id']
+        left_image = sample['left_wrist_image']
+        right_image = sample['right_wrist_image']
+        sample_id = sample['sample_id']
         
         fig, axes = plt.subplots(1, 2, figsize=(8, 4))
         
@@ -397,7 +400,7 @@ class FlexivTrajectoryVisualizer:
             axes[1].text(0.5, 0.5, 'No Right Image', ha='center', va='center', transform=axes[1].transAxes)
             axes[1].axis('off')
             
-        plt.suptitle(f'Input Images - Episode {episode_id}', fontsize=14, fontweight='bold')
+        plt.suptitle(f'Input Images - Sample {sample_id}', fontsize=14, fontweight='bold')
         plt.tight_layout()
         
         if save_path:
@@ -407,13 +410,13 @@ class FlexivTrajectoryVisualizer:
             plt.show()
         plt.close()
     
-    def plot_3d_trajectory_comparison(self, episode: Dict, inference_result: Dict,
+    def plot_3d_trajectory_comparison(self, sample: Dict, inference_result: Dict,
                                     save_path: Optional[str] = None) -> None:
         """Plot 3D trajectory comparison for left and right hands."""
-        gt_actions = episode['gt_actions']
+        gt_actions = sample['gt_actions']
         pred_actions = inference_result['predicted_actions']
-        initial_state = episode['state']
-        episode_id = episode['episode_id']
+        initial_state = sample['state'] + sample['prev_state']
+        sample_id = sample['sample_id']
         
         # Convert to numpy arrays if needed
         if hasattr(gt_actions, 'detach'):
@@ -449,38 +452,45 @@ class FlexivTrajectoryVisualizer:
         gt_actions = gt_actions[:min_len]
         pred_actions = pred_actions[:min_len]
         
-        # Extract initial positions (first 3 dims for left hand, dims 7-9 for right hand)
-        left_hand_init_pos = initial_state[:3]  # xyz for left hand
-        right_hand_init_pos = initial_state[7:10]  # xyz for right hand
+        # Extract initial positions from state
+        # New format: first 7 dims for left hand, last 7 dims for right hand
+        # Each hand: [x, y, z, rx, ry, rz, gripper_width]
+        left_hand_init_pos = initial_state[:3]  # xyz for left hand (first 3 of first 7)
+        right_hand_init_pos = initial_state[7:10]  # xyz for right hand (first 3 of last 7)
         
-        # Compute cumulative trajectories from delta actions
-        # GT trajectories
-        gt_left_deltas = gt_actions[:, :3]  # Left hand xyz deltas
-        gt_right_deltas = gt_actions[:, 7:10]  # Right hand xyz deltas
+        # Extract absolute positions from actions
+        # New action format: first 7 dims for left hand, last 7 dims for right hand
+        # Each hand action: [abs_x, abs_y, abs_z, abs_rx, abs_ry, abs_rz, abs_gripper_width]
+        # GT trajectories - actions are already absolute positions
+        gt_left_positions = gt_actions[:, :3]  # Left hand xyz absolute positions (first 3 of first 7)
+        gt_right_positions = gt_actions[:, 7:10]  # Right hand xyz absolute positions (first 3 of last 7)
         
+        # Create trajectory arrays including initial state
         gt_left_trajectory = np.zeros((min_len + 1, 3))
         gt_right_trajectory = np.zeros((min_len + 1, 3))
         
+        # First point is the initial position from state
         gt_left_trajectory[0] = left_hand_init_pos
         gt_right_trajectory[0] = right_hand_init_pos
         
-        for i in range(min_len):
-            gt_left_trajectory[i + 1] = gt_left_trajectory[i] + gt_left_deltas[i]
-            gt_right_trajectory[i + 1] = gt_right_trajectory[i] + gt_right_deltas[i]
+        # Subsequent points are the absolute positions from actions
+        gt_left_trajectory[1:min_len + 1] = gt_left_positions
+        gt_right_trajectory[1:min_len + 1] = gt_right_positions
         
-        # Predicted trajectories
-        pred_left_deltas = pred_actions[:, :3]  # Left hand xyz deltas
-        pred_right_deltas = pred_actions[:, 7:10]  # Right hand xyz deltas
+        # Predicted trajectories - actions are already absolute positions
+        pred_left_positions = pred_actions[:, :3]  # Left hand xyz absolute positions (first 3 of first 7)
+        pred_right_positions = pred_actions[:, 7:10]  # Right hand xyz absolute positions (first 3 of last 7)
         
         pred_left_trajectory = np.zeros((min_len + 1, 3))
         pred_right_trajectory = np.zeros((min_len + 1, 3))
         
+        # First point is the initial position from state
         pred_left_trajectory[0] = left_hand_init_pos
         pred_right_trajectory[0] = right_hand_init_pos
         
-        for i in range(min_len):
-            pred_left_trajectory[i + 1] = pred_left_trajectory[i] + pred_left_deltas[i]
-            pred_right_trajectory[i + 1] = pred_right_trajectory[i] + pred_right_deltas[i]
+        # Subsequent points are the absolute positions from actions
+        pred_left_trajectory[1:min_len + 1] = pred_left_positions
+        pred_right_trajectory[1:min_len + 1] = pred_right_positions
         
         # Create 3D plot
         fig = plt.figure(figsize=(15, 5))
@@ -544,7 +554,7 @@ class FlexivTrajectoryVisualizer:
         ax3.set_title('Right Hand Trajectory')
         ax3.legend()
         
-        plt.suptitle(f'3D Hand Trajectories - Episode {episode_id}', fontsize=14, fontweight='bold')
+        plt.suptitle(f'3D Hand Trajectories - Sample {sample_id}', fontsize=14, fontweight='bold')
         plt.tight_layout()
         
         if save_path:
@@ -554,9 +564,9 @@ class FlexivTrajectoryVisualizer:
             plt.show()
         plt.close()
     
-    def compute_metrics(self, episode: Dict, inference_result: Dict) -> Dict[str, float]:
+    def compute_metrics(self, sample: Dict, inference_result: Dict) -> Dict[str, float]:
         """Compute trajectory comparison metrics."""
-        gt_actions = episode['gt_actions']
+        gt_actions = sample['gt_actions']
         pred_actions = inference_result['predicted_actions']
         
         # Handle different shapes
@@ -618,59 +628,59 @@ class FlexivTrajectoryVisualizer:
             'inference_time': inference_result['inference_time']
         }
     
-    def visualize_episodes(self, episodes: List[Dict]) -> Dict[str, Any]:
-        """Visualize multiple episodes."""
+    def visualize_samples(self, samples: List[Dict]) -> Dict[str, Any]:
+        """Visualize multiple samples."""
         results = {
-            'episodes': [],
+            'samples': [],
             'aggregate_metrics': {}
         }
         
         all_metrics = []
         
-        for episode in episodes:
-            print(f"\nProcessing episode {episode['episode_id']}...")
+        for sample in samples:
+            print(f"\nProcessing sample {sample['sample_id']}...")
             
             # Run inference
-            inference_result = self.run_inference_on_episode(episode)
+            inference_result = self.run_inference_on_sample(sample)
             
             # Compute metrics
-            metrics = self.compute_metrics(episode, inference_result)
+            metrics = self.compute_metrics(sample, inference_result)
             all_metrics.append(metrics)
             
             # Create sample-specific output directory
-            sample_dir = self.output_dir / f"sample_{episode['sample_id']}"
+            sample_dir = self.output_dir / f"sample_{sample['sample_id']}"
             sample_dir.mkdir(exist_ok=True)
             
             # Generate plots
             self.plot_trajectory_comparison(
-                episode, inference_result,
+                sample, inference_result,
                 save_path=sample_dir / "trajectory_comparison.png"
             )
             
             self.plot_action_horizon_comparison(
-                episode, inference_result, timestep=0,
+                sample, inference_result, timestep=0,
                 save_path=sample_dir / "action_horizon_t0.png"
             )
             
             self.plot_images_sequence(
-                episode,
+                sample,
                 save_path=sample_dir / "input_images.png"
             )
             
-            # Store episode and inference result for batch 3D plotting
-            episode['inference_result'] = inference_result
+            # Store sample and inference result for batch 3D plotting
+            sample['inference_result'] = inference_result
             
             self.plot_3d_trajectory_comparison(
-                episode, inference_result,
+                sample, inference_result,
                 save_path=sample_dir / "3d_trajectories.png"
             )
             
             # Store results
-            episode_result = {
-                'episode_id': episode['episode_id'],
+            sample_result = {
+                'sample_id': sample['sample_id'],
                 'metrics': metrics
             }
-            results['episodes'].append(episode_result)
+            results['samples'].append(sample_result)
         
         # Compute aggregate metrics
         if all_metrics:
@@ -680,39 +690,39 @@ class FlexivTrajectoryVisualizer:
                 'mean_mae': np.mean([m['mae'] for m in all_metrics]),
                 'std_mae': np.std([m['mae'] for m in all_metrics]),
                 'mean_inference_time': np.mean([m['inference_time'] for m in all_metrics]),
-                'total_episodes': len(episodes)
+                'total_samples': len(samples)
             }
             
             # Plot aggregate metrics
             self.plot_aggregate_metrics(all_metrics)
             
             # Plot combined 3D trajectories for all samples from the same episode
-            if episodes:
-                self.plot_combined_3d_trajectories(episodes, save_path=self.output_dir / "combined_3d_trajectories.png")
+            if samples:
+                self.plot_combined_3d_trajectories(samples, save_path=self.output_dir / "combined_3d_trajectories.png")
         
         print(f"\nVisualization complete! Results saved to {self.output_dir}")
         return results
     
-    def plot_combined_3d_trajectories(self, episodes: List[Dict], save_path: Optional[str] = None) -> None:
+    def plot_combined_3d_trajectories(self, samples: List[Dict], save_path: Optional[str] = None) -> None:
         """Plot 3D trajectories for multiple samples from the same episode - K rows x 3 columns layout."""
-        if not episodes:
+        if not samples:
             return
             
-        episode_source_id = episodes[0].get('episode_source_id', 'Unknown')
-        num_samples = len(episodes)
+        episode_source_id = samples[0].get('episode_source_id', 'Unknown')
+        num_samples = len(samples)
         
         # Create figure with K rows x 3 columns
         fig = plt.figure(figsize=(18, 6 * num_samples))
         
-        for sample_idx, episode in enumerate(episodes):
-            if 'inference_result' not in episode:
+        for sample_idx, sample in enumerate(samples):
+            if 'inference_result' not in sample:
                 continue
                 
-            inference_result = episode['inference_result']
-            gt_actions = episode['gt_actions']
+            inference_result = sample['inference_result']
+            gt_actions = sample['gt_actions']
             pred_actions = inference_result['predicted_actions']
-            initial_state = episode['state']
-            frame_id = episode.get('sample_id', sample_idx)
+            initial_state = sample['state'] + sample['prev_state']
+            frame_id = sample.get('sample_id', sample_idx)
             
             # Convert to numpy arrays if needed
             if hasattr(gt_actions, 'detach'):
@@ -747,38 +757,45 @@ class FlexivTrajectoryVisualizer:
             gt_actions = gt_actions[:min_len]
             pred_actions = pred_actions[:min_len]
             
-            # Extract initial positions
-            left_hand_init_pos = initial_state[:3]  # xyz for left hand
-            right_hand_init_pos = initial_state[7:10]  # xyz for right hand
+            # Extract initial positions from state
+            # New format: first 7 dims for left hand, last 7 dims for right hand
+            # Each hand: [x, y, z, rx, ry, rz, gripper_width]
+            left_hand_init_pos = initial_state[:3]  # xyz for left hand (first 3 of first 7)
+            right_hand_init_pos = initial_state[7:10]  # xyz for right hand (first 3 of last 7)
             
-            # Compute cumulative trajectories from delta actions
-            # GT trajectories
-            gt_left_deltas = gt_actions[:, :3]
-            gt_right_deltas = gt_actions[:, 7:10]
+            # Extract absolute positions from actions
+            # New action format: first 7 dims for left hand, last 7 dims for right hand
+            # Each hand action: [abs_x, abs_y, abs_z, abs_rx, abs_ry, abs_rz, abs_gripper_width]
+            # GT trajectories - actions are already absolute positions
+            gt_left_positions = gt_actions[:, :3]  # Left hand xyz absolute positions (first 3 of first 7)
+            gt_right_positions = gt_actions[:, 7:10]  # Right hand xyz absolute positions (first 3 of last 7)
             
+            # Create trajectory arrays including initial state
             gt_left_trajectory = np.zeros((min_len + 1, 3))
             gt_right_trajectory = np.zeros((min_len + 1, 3))
             
+            # First point is the initial position from state
             gt_left_trajectory[0] = left_hand_init_pos
             gt_right_trajectory[0] = right_hand_init_pos
             
-            for j in range(min_len):
-                gt_left_trajectory[j + 1] = gt_left_trajectory[j] + gt_left_deltas[j]
-                gt_right_trajectory[j + 1] = gt_right_trajectory[j] + gt_right_deltas[j]
+            # Subsequent points are the absolute positions from actions
+            gt_left_trajectory[1:min_len + 1] = gt_left_positions
+            gt_right_trajectory[1:min_len + 1] = gt_right_positions
             
-            # Predicted trajectories
-            pred_left_deltas = pred_actions[:, :3]
-            pred_right_deltas = pred_actions[:, 7:10]
+            # Predicted trajectories - actions are already absolute positions
+            pred_left_positions = pred_actions[:, :3]  # Left hand xyz absolute positions (first 3 of first 7)
+            pred_right_positions = pred_actions[:, 7:10]  # Right hand xyz absolute positions (first 3 of last 7)
             
             pred_left_trajectory = np.zeros((min_len + 1, 3))
             pred_right_trajectory = np.zeros((min_len + 1, 3))
             
+            # First point is the initial position from state
             pred_left_trajectory[0] = left_hand_init_pos
             pred_right_trajectory[0] = right_hand_init_pos
             
-            for j in range(min_len):
-                pred_left_trajectory[j + 1] = pred_left_trajectory[j] + pred_left_deltas[j]
-                pred_right_trajectory[j + 1] = pred_right_trajectory[j] + pred_right_deltas[j]
+            # Subsequent points are the absolute positions from actions
+            pred_left_trajectory[1:min_len + 1] = pred_left_positions
+            pred_right_trajectory[1:min_len + 1] = pred_right_positions
             
             # Create subplots for this sample (row sample_idx)
             # Column 1: Combined view
@@ -843,7 +860,7 @@ class FlexivTrajectoryVisualizer:
             if sample_idx == 0:
                 ax3.legend(fontsize=8)
         
-        plt.suptitle(f'3D Hand Trajectories - Episode {episode_source_id} ({num_samples} samples)', 
+        plt.suptitle(f'3D Hand Trajectories - Episode {episode_source_id} (Visualizing {num_samples} samples)', 
                     fontsize=16, fontweight='bold')
         plt.tight_layout()
         
@@ -855,7 +872,7 @@ class FlexivTrajectoryVisualizer:
         plt.close()
     
     def plot_aggregate_metrics(self, all_metrics: List[Dict]) -> None:
-        """Plot aggregate metrics across all episodes."""
+        """Plot aggregate metrics across all samples."""
         fig, axes = plt.subplots(2, 2, figsize=(12, 10))
         
         # MSE distribution
@@ -909,26 +926,27 @@ def main():
         checkpoint_path = download.maybe_download(args.checkpoint)
     else:
         checkpoint_path = args.checkpoint
-    
+    output_dir = os.path.join('output_images', args.output_dir)
+    os.makedirs(output_dir, exist_ok=True)
     # Create visualizer
     visualizer = FlexivTrajectoryVisualizer(
         config_name=args.config,
         checkpoint_path=checkpoint_path,
-        output_dir=args.output_dir
+        output_dir=output_dir
     )
     
     # Load samples from specified episode
     print(f"Loading {args.num_samples} samples from episode {args.episode_id}...")
-    episodes = visualizer.load_real_dataset_episodes(episode_id=args.episode_id, num_samples=args.num_samples)
+    samples = visualizer.load_real_dataset_samples(episode_id=args.episode_id, num_samples=args.num_samples)
     
     # Run visualization
-    results = visualizer.visualize_episodes(episodes)
+    results = visualizer.visualize_samples(samples)
     
     # Print summary
     if results['aggregate_metrics']:
         metrics = results['aggregate_metrics']
         print(f"\n=== Summary Statistics ===")
-        print(f"Episodes processed: {metrics['total_episodes']}")
+        print(f"Samples processed: {metrics['total_samples']}")
         print(f"Mean MSE: {metrics['mean_mse']:.6f} ± {metrics['std_mse']:.6f}")
         print(f"Mean MAE: {metrics['mean_mae']:.6f} ± {metrics['std_mae']:.6f}")
         print(f"Mean Inference Time: {metrics['mean_inference_time']:.2f} ms")
