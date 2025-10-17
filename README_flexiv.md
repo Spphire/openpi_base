@@ -63,7 +63,7 @@ class LeRobotBimanualFlexivDataConfig(DataConfigFactory):
             data_transforms=data_transforms,
             model_transforms=model_transforms,
         )
-        
+
 @dataclasses.dataclass(frozen=True)
 class UmiDeltaStateAndActions(DataTransformFn):
     """Repacks absolute state and actions into delta state and actions space."""
