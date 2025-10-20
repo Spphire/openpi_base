@@ -40,15 +40,16 @@ obs_input = {
 'prompt' = 'pick the wooden block and the blue box to the dark area'
 """
 ```
-Q: Is 'observation/state' normalized? 
-A: False
+**Q**: Is 'observation/state' normalized? 
+**A**: False
 
-Q: What is the image looklike?
-A: Visualization of `Image.fromarray(obs_input['observation/left_wrist_image'])` and the right one
+**Q**: What is the image looklike?
+**A**: Visualization of `Image.fromarray(obs_input['observation/left_wrist_image'])` and the right one
 [left_image](example_left.png)
 [right_image](example_right.png)
 
-Q: Details of prev_state\state\action
+**Q**: Details of prev_state\state\action
+**A**
 ```
 # index 0
 sample['prev_state']
@@ -95,3 +96,40 @@ tensor([[ 0.1362, -0.6764, -1.3129,  1.5646,  0.8910, -0.8896,  0.0914, -0.4037,
        dtype=torch.float64)
 ```
 According to the outputs, the predictions are "absolute poses" in the **umi** coord system, i.e., the same to "gt_actions".
+
+**Q**: Is the state\prev_state\actions the same to the ones in dataset.zarr.zip?
+**A**: Yes.
+```python 
+# Before line 92 of zarr_to_robot.py: episode_0: index 0
+episode_data['prev_state'][0]
+array([-0.12509885, -0.53324103, -1.411674  ,  0.9033407 ,  1.0463864 ,
+       -0.5578184 ,  0.09139425, -0.43257144, -0.48153993, -0.89219046,
+        0.88634396,  1.0593289 , -0.4370737 ,  0.08252178], dtype=float32)
+episode_data['state'][0]
+array([-0.12509885, -0.53324103, -1.411674  ,  0.9033407 ,  1.0463864 ,
+       -0.5578184 ,  0.09139425, -0.43257144, -0.48153993, -0.89219046,
+        0.88634396,  1.0593289 , -0.4370737 ,  0.08252178], dtype=float32)
+
+episode_data['actions'][0]
+array([-0.12271893, -0.534418  , -1.4115884 ,  0.90323037,  1.047665  ,
+       -0.5597333 ,  0.09139425, -0.43103784, -0.481589  , -0.8908929 ,
+        0.8810003 ,  1.0597482 , -0.43553764,  0.08252178], dtype=float32)
+```
+```python
+# LerobotDataset: episode_0: index 0
+sample['prev_state']
+tensor([-0.1251, -0.5332, -1.4117,  0.9033,  1.0464, -0.5578,  0.0914, -0.4326,
+        -0.4815, -0.8922,  0.8863,  1.0593, -0.4371,  0.0825])
+
+sample['state']
+tensor([-0.1251, -0.5332, -1.4117,  0.9033,  1.0464, -0.5578,  0.0914, -0.4326,
+        -0.4815, -0.8922,  0.8863,  1.0593, -0.4371,  0.0825])
+
+sample['gt_actions'][0:3,]
+tensor([[-0.1227, -0.5344, -1.4116,  0.9032,  1.0477, -0.5597,  0.0914, -0.4310,
+         -0.4816, -0.8909,  0.8810,  1.0597, -0.4355,  0.0825],
+        [-0.1203, -0.5347, -1.4096,  0.9089,  1.0489, -0.5626,  0.0914, -0.4283,
+         -0.4820, -0.8885,  0.8660,  1.0664, -0.4328,  0.0825],
+        [-0.1182, -0.5348, -1.4086,  0.9187,  1.0537, -0.5652,  0.0914, -0.4248,
+         -0.4820, -0.8856,  0.8626,  1.0730, -0.4298,  0.0825]])
+```
