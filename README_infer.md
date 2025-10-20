@@ -45,8 +45,8 @@ A: False
 
 Q: What is the image looklike?
 A: Visualization of `Image.fromarray(obs_input['observation/left_wrist_image'])` and the right one
-[left_image](assets/example_left.png)
-[right_image](assets/example_right.png)
+[left_image](example_left.png)
+[right_image](example_right.png)
 
 Q: Details of prev_state\state\action
 ```
