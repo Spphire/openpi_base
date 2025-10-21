@@ -47,7 +47,6 @@ class BimanualFlexivInputs(transforms.DataTransformFn):
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {
             "state": data["observation/state"],
-            "prev_state": data["observation/prev_state"],
             "image": {
                 "base_0_rgb": np.zeros_like(left_wrist_image),
                 "left_wrist_0_rgb": left_wrist_image,
@@ -59,6 +58,8 @@ class BimanualFlexivInputs(transforms.DataTransformFn):
                 "right_wrist_0_rgb": np.True_,
             },
         }
+        if "prev_state" in data:
+            inputs["prev_state"] = data["prev_state"]
 
         if "actions" in data:
             inputs["actions"] = data["actions"]

@@ -222,6 +222,36 @@ class DeltaActions(DataTransformFn):
         return data
 
 @dataclasses.dataclass(frozen=True)
+class UmiZeroStateAndRelativeActions(DataTransformFn):
+    """Repacks absolute state and actions into zero state and relative actions space."""
+
+    # Boolean mask for the action dimensions to be repacked into delta action space. Length
+    # can be smaller than the actual number of dimensions. If None, this transform is a no-op.
+    # See `make_bool_mask` for more details.
+    mask: Sequence[bool] | None
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if self.mask is None: return data
+        mask = np.asarray(self.mask)
+        dims = mask.shape[-1]
+        state = data["state"]
+        if "actions" in data:
+            actions = data["actions"]
+            actions[..., :dims] -= np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2)
+            data['actions'] = actions
+        data['state'] = np.zeros_like(state)
+        return data
+
+@dataclasses.dataclass(frozen=True)
+class UmiIdentityActions(DataTransformFn):
+    """Repacks"""
+
+    mask: Sequence[bool] | None
+
+    def __call__(self, data: DataDict) -> DataDict:
+        return data
+
+@dataclasses.dataclass(frozen=True)
 class UmiDeltaStateAndActions(DataTransformFn):
     """Repacks absolute state and actions into delta state and actions space."""
 

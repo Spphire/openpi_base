@@ -21,13 +21,13 @@
             //     "-cfg", "pi05_pick_1015merged", "-ckpt", "/mnt/model/Codes/openpi/checkpoints/pi05_pick_1015merged/exp_pi05_1015merged/29999",
             //     "--output-dir", "umi1015merged_pi05_3w_v2"
             // ],
-            // "args": [ //training args
-            //     "pi05_umi_1010all_server", "--exp-name=umi_1010all_server_1016", "--plot_interval=1", "--resume"
-            // ]
-            "args": [ //data convert args
-                "preprocess_data/configs/config1015_merged.yaml",
-                "flexiv/pick_debug_zarr_1015",
+            "args": [ //training args
+                "pi05_place1020", "--exp-name=debug__1020", "--plot_interval=5000", 
             ]
+            // "args": [ //data convert args
+            //     "preprocess_data/configs/config1020_merged.yaml",
+            //     "flexiv/place_block",
+            // ]
             // "args": [ //computing norm args
             //     "--config-name", "pi05_umi_1010all_server"
             // ],
