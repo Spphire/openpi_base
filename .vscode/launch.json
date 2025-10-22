@@ -16,20 +16,19 @@
                 "HF_LEROBOT_HOME": "/mnt/model/.cache/huggingface/hub/lerobot",
                 "HF_HOME": "/mnt/model/.cache/huggingface/hub/",
             },
-            
             // "args": [ //visualize args
             //     "-cfg", "pi05_pick_1015merged", "-ckpt", "/mnt/model/Codes/openpi/checkpoints/pi05_pick_1015merged/exp_pi05_1015merged/29999",
             //     "--output-dir", "umi1015merged_pi05_3w_v2"
             // ],
             "args": [ //training args
-                "pi05_place1020", "--exp-name=debug__1020", "--plot_interval=5000", 
+                "pi05_place1021", "--exp-name=debug_1021", "--plot_interval=5000", "--overwrite"
             ]
             // "args": [ //data convert args
-            //     "preprocess_data/configs/config1020_merged.yaml",
-            //     "flexiv/place_block",
-            // ]
+            //     "preprocess_data/configs/config1021_merged.yaml",
+            //     "flexiv/place_1021",
+            // ],
             // "args": [ //computing norm args
-            //     "--config-name", "pi05_umi_1010all_server"
+            //     "--config-name", "pi05_place1021"
             // ],
         }
     ]

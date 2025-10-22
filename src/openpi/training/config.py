@@ -28,6 +28,7 @@ import openpi.training.misc.roboarena_config as roboarena_config
 import openpi.training.optimizer as _optimizer
 import openpi.training.weight_loaders as weight_loaders
 import openpi.transforms as _transforms
+import openpi.training.dsl_pose_utils as dsl
 
 ModelType: TypeAlias = _model.ModelType
 # Work around a tyro issue with using nnx.filterlib.Filter directly.
@@ -224,6 +225,45 @@ class SimpleDataConfig(DataConfigFactory):
             model_transforms=self.model_transforms(model_config),
         )
 
+
+
+@dataclasses.dataclass(frozen=True)
+class LeRobotBimanualFlexivV3DataConfig(DataConfigFactory):
+
+    extra_delta_transform: bool = True
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig, *args, **kwargs) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/left_wrist_image": "left_wrist_image",
+                        "observation/right_wrist_image": "right_wrist_image",
+                        "observation/state": "state",
+                        "actions": "actions",
+                        "prompt": "task",
+                    }
+                )
+            ]
+        )
+        data_transforms = _transforms.Group(
+            inputs=[bimanual_flexiv_policy.BimanualFlexivInputs(model_type=model_config.model_type)],
+            outputs=[bimanual_flexiv_policy.BimanualFlexivOutputs()],
+        )
+        model_transforms = ModelTransformFactory()(model_config)
+        if self.extra_delta_transform:
+            delta_action_mask = _transforms.make_bool_mask(6, -1, 6, -1)
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.UmiZeroStateAndRealRelativeActions(delta_action_mask)], # Use UmiZeroStateAndRealRelativeActions to convert state and actions to zero state and real relative actions space
+                outputs=[_transforms.UmiIdentityActions(delta_action_mask)], # Use UmiAbsoluteActions to convert delta state and actions space to absolute state and actions space
+            )
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
 
 @dataclasses.dataclass(frozen=True)
 class LeRobotBimanualFlexivV2DataConfig(DataConfigFactory):
@@ -630,6 +670,27 @@ class TrainConfig:
 
 # Use `get_config` if you need to get a config by name in your code.
 _CONFIGS = [
+    TrainConfig(
+        name="pi05_place1021",
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=40, discrete_state_input=False),
+        data=LeRobotBimanualFlexivV3DataConfig(
+            repo_id="flexiv/place_1021", # change name here
+            base_config=DataConfig(prompt_from_task=False),
+            extra_delta_transform=True,
+        ),
+        batch_size=64,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
         TrainConfig(
         name="pi05_place1020",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=40, discrete_state_input=False),

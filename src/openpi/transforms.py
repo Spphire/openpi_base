@@ -11,7 +11,8 @@ from openpi_client import image_tools
 from openpi.models import tokenizer as _tokenizer
 from openpi.shared import array_typing as at
 from openpi.shared import normalize as _normalize
-
+import openpi.training.dsl_pose_utils as dsl
+from scipy.spatial.transform import Rotation
 DataDict: TypeAlias = at.PyTree
 NormStats: TypeAlias = _normalize.NormStats
 
@@ -239,6 +240,48 @@ class UmiZeroStateAndRelativeActions(DataTransformFn):
             actions = data["actions"]
             actions[..., :dims] -= np.expand_dims(np.where(mask, state[..., :dims], 0), axis=-2)
             data['actions'] = actions
+        data['state'] = np.zeros_like(state)
+        return data
+
+@dataclasses.dataclass(frozen=True)
+class UmiZeroStateAndRealRelativeActions(DataTransformFn):
+    """Repacks absolute state and actions into zero state and relative actions space."""
+
+    # Boolean mask for the action dimensions to be repacked into delta action space. Length
+    # can be smaller than the actual number of dimensions. If None, this transform is a no-op.
+    # See `make_bool_mask` for more details.
+    mask: Sequence[bool] | None
+
+    def array_to_pose_and_gripper(self, x):
+        if len(x.shape) == 1:
+            x = x[np.newaxis, :]
+        left_pos, left_axis_angle, left_grip, right_pos, right_axis_angle, right_grip = x[:,:3], x[:,3:6], x[:,6:7], x[:,7:10], x[:,10:13], x[:,13:14]
+        left_pose = np.concatenate([left_pos, left_axis_angle], axis=1)
+        right_pose = np.concatenate([right_pos, right_axis_angle], axis=1)
+        left_pose_mat = dsl.pose_to_mat(left_pose) # pos, axis_angle -> mat
+        right_pose_mat = dsl.pose_to_mat(right_pose)
+        return left_pose_mat, left_grip, right_pose_mat, right_grip
+
+    def __call__(self, data: DataDict) -> DataDict:
+        if self.mask is None: return data
+        mask = np.asarray(self.mask)
+        dims = mask.shape[-1]
+        state = data["state"]
+        if "actions" in data:
+            state_left_pose_mat, state_left_grip, state_right_pose_mat, state_right_grip = self.array_to_pose_and_gripper(state)
+            action_left_pose_mat, action_left_grip, action_right_pose_mat, action_right_grip = self.array_to_pose_and_gripper(data["actions"])
+            # convert to relative poses based on the state
+            action_left_relative_pose_mat = dsl.convert_pose_mat_rep(action_left_pose_mat, state_left_pose_mat[0], "relative")
+            action_right_relative_pose_mat = dsl.convert_pose_mat_rep(action_right_pose_mat, state_right_pose_mat[0], "relative")
+            # convert rotation to rpy
+            action_left_relative_rpy = Rotation.from_matrix(action_left_relative_pose_mat[:,:3,:3]).as_euler('xyz', degrees=False)
+            action_right_relative_rpy = Rotation.from_matrix(action_right_relative_pose_mat[:,:3,:3]).as_euler('xyz', degrees=False)
+            action_left_relative_pos = action_left_relative_pose_mat[:,:3,3]
+            action_right_relative_pos = action_right_relative_pose_mat[:,:3,3]
+            # merge actions 
+            action_left = np.concatenate([action_left_relative_pos, action_left_relative_rpy, action_left_grip], axis=1)
+            action_right = np.concatenate([action_right_relative_pos, action_right_relative_rpy, action_right_grip], axis=1)
+            data['actions'] = np.concatenate([action_left, action_right], axis=1)
         data['state'] = np.zeros_like(state)
         return data
 
