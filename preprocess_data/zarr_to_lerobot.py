@@ -1,3 +1,9 @@
+"""
+1. action=state, no prev state
+2. use tcp gripper coordinate system
+3. convert the rotation representation to rpy (euler)
+"""
+
 DIFFUSION_POLICY_DIR = "/home/wz/Data-Scaling-Laws/"
 import os
 import sys
@@ -6,6 +12,7 @@ import zarr
 import argparse
 from diffusion_policy.common.replay_buffer import ReplayBuffer
 from diffusion_policy.codecs.imagecodecs_numcodecs import register_codecs
+from umi.common.pose_util import pos_rot_to_mat, mat_to_pos_rot, pose_to_pos_rot, pos_rot_to_pose, pose_to_mat, mat_to_pose
 import numpy as np
 register_codecs()
 from pathlib import Path
@@ -13,6 +20,7 @@ import shutil
 from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 import numpy as np
+from scipy.spatial.transform import Rotation
 
 
 class Converter:
@@ -36,6 +44,13 @@ class Converter:
         self.features = self.config["features"]
         for k in self.features:
             self.features[k]["shape"] = tuple(self.features[k]["shape"])
+        self.tcp_to_vive_transform = np.array([ 
+            [  0.0000  , -0.9397 ,  0.3420,  -0.0317],
+            [1.0000 ,  0.0000  , 0.0000  , 0.0000],
+            [0.0000  , 0.3420 ,  0.9397 , -0.272],
+            [0.0000  , 0.0000  , 0.0000  , 1.0000]
+        ]).astype(np.float32)
+        self.vive_to_tcp_transform = np.linalg.inv(self.tcp_to_vive_transform)
 
     def read_dataset(self, dataset_path):
         with zarr.ZipStore(dataset_path, mode='r') as zip_store:
@@ -69,27 +84,31 @@ class Converter:
                     episode_data = {
                         k: getattr(replay_buffer.data, k)[start_idx:end_idx] for k in all_keys
                     }
-                    state = np.concatenate(
-                        [
-                            episode_data["robot0_eef_pos"],
-                            episode_data["robot0_eef_rot_axis_angle"],
-                            episode_data["robot0_gripper_width"],
-                            episode_data["robot1_eef_pos"],
-                            episode_data["robot1_eef_rot_axis_angle"],
-                            episode_data["robot1_gripper_width"],
-                        ],
-                        axis=1,
-                    ).astype(np.float32)
-                    num_frames = state.shape[0] - 1
-                    episode_data["state"] = state[:-1, :]
-                    episode_data["prev_state"] = np.concatenate([state[:1,:], state[:-2, :]], axis=0)
-                    assert episode_data["state"].shape[0]==episode_data["prev_state"].shape[0]
-                    episode_data["left_wrist_image"] = episode_data['camera0_rgb'][:-1, :]
-                    episode_data["right_wrist_image"] = episode_data['camera1_rgb'][:-1, :]
-                    #############################################################################################
-                    episode_data["actions"] = state[1:, :] # directly use the next state as the action
-                    #############################################################################################
+                    # construct state 
+                    # convert pose to mat
+                    left_pose = np.concatenate([episode_data["robot0_eef_pos"], episode_data["robot0_eef_rot_axis_angle"]], axis=1)
+                    right_pose = np.concatenate([episode_data["robot1_eef_pos"], episode_data["robot1_eef_rot_axis_angle"]], axis=1)
+                    left_gripper_width = episode_data["robot0_gripper_width"]
+                    right_gripper_width = episode_data["robot1_gripper_width"]
+                    left_pose_mat = pose_to_mat(left_pose)
+                    right_pose_mat = pose_to_mat(right_pose)
+                    # transform to tcp coordinate system
+                    if getattr(self, "vive_to_tcp_transform", None) is not None:
+                        left_pose_mat =  left_pose_mat @ self.vive_to_tcp_transform
+                        right_pose_mat = right_pose_mat @ self.vive_to_tcp_transform
+                    # convert to xyz+axis_angle representation
+                    left_pose = mat_to_pose(left_pose_mat)
+                    right_pose = mat_to_pose(right_pose_mat)
+                    left_state = np.concatenate([left_pose, left_gripper_width], axis=1)
+                    right_state = np.concatenate([right_pose, right_gripper_width], axis=1)
+                    state = np.concatenate([left_state, right_state], axis=1).astype(np.float32)
+                    # construct actions (use state as the action)
+                    episode_data["state"] = state
+                    episode_data["actions"] = state
+                    episode_data["left_wrist_image"] = episode_data['camera0_rgb']
+                    episode_data["right_wrist_image"] = episode_data['camera1_rgb']
                     episode_data["task"] = task
+                    num_frames = state.shape[0]
                     for step in range(num_frames):
                         frame_dict = {feat: episode_data[feat][step] for feat in self.features}
                         frame_dict["task"] = task
