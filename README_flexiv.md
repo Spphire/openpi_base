@@ -1,7 +1,8 @@
 # TODO
-- 修正state的定义：因为机器拿到的state和训练集state定义不一样。根据diffusion policy中把state转到了relative pose，因此在该框架中需要把state转为上一次的delta 动作；
+- (2025.10.28) 增加异步lerobot数据集转换    
+- ~~修正state的定义：因为机器拿到的state和训练集state定义不一样。根据diffusion policy中把state转到了relative pose，因此在该框架中需要把state转为上一次的delta 动作； ~~ ✔
 - ~~增加模型推理可视化脚本和ground truth的对比~~ ✔
-- 推理pipeline接入SuperInference 
+- ~~推理pipeline接入SuperInference ~~ ✔
 - ~~训练过程中加入推理可视化记录~~ ✔
 - ~~确认抓夹的归一化方式，以及抓夹是否使用delta: 抓夹用的绝对动作，应该在数据预处理阶段避免对它的delta计算~~ ✔ 
 - ~~加入zarr转lerobot数据集~~ ✔
