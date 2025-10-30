@@ -317,7 +317,7 @@ class LeRobotBimanualFlexivDataConfig(DataConfigFactory):
                         "observation/left_wrist_image": "left_wrist_image",
                         "observation/right_wrist_image": "right_wrist_image",
                         "observation/state": "state",
-                        "observation/prev_state": "prev_state",
+                        # "observation/prev_state": "prev_state",
                         "actions": "actions",
                         "prompt": "task",
                     }

@@ -11,7 +11,7 @@ def make_bimanual_flexiv_example() -> dict:
     """Creates a random input example for the Libero policy."""
     return {
         "observation/state": np.random.rand(14),
-        "observation/prev_state": np.random.rand(14),
+        # "observation/prev_state": np.random.rand(14),
         "observation/left_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "observation/right_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "prompt": "do something",
