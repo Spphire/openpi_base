@@ -253,10 +253,11 @@ def create_data_loader(
             skip_norm_stats=skip_norm_stats,
             framework=framework,
         )
+    action_horizon = config.model.async_action_horizon if getattr(config.model, 'async_action_horizon', -1) > 0 else config.model.action_horizon
     return create_torch_data_loader(
         data_config,
         model_config=config.model,
-        action_horizon=config.model.action_horizon,
+        action_horizon=action_horizon,
         batch_size=config.batch_size,
         sharding=sharding,
         shuffle=shuffle,
