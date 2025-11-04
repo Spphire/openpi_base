@@ -23,16 +23,16 @@
             // "args": [ //debug for libero
             //     "pi05_libero", "--exp-name=libero_debug", "--plot_interval=5000", "--overwrite"
             // ],
-            "args": [ //training args
-                "pi05_place1102", "--exp-name=debug_1102", "--plot_interval=5000", "--overwrite"
-            ]
+            // "args": [ //training args
+            //     "pi05_place1102", "--exp-name=debug_1102", "--plot_interval=5000", "--overwrite"
+            // ]
             // "args": [ //data convert args
             //     "preprocess_data/configs/config1021_merged.yaml",
             //     "flexiv/place_1021",
             // ],
-            // "args": [ //computing norm args
-            //     "--config-name", "pi05_place1102"
-            // ],
+            "args": [ //computing norm args
+                "--config-name", "pi05_place1103"
+            ],
         }
     ]
 }
