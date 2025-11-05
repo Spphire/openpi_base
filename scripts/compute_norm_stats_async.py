@@ -102,6 +102,7 @@ def main(config_name: str, max_frames: int | None = None):
     keys = ["state", "actions"]
     stats = {key: normalize.RunningStats() for key in keys}
 
+
     for batch in tqdm.tqdm(data_loader, total=num_batches, desc="Computing stats"):
         for key in keys:
             stats[key].update(np.asarray(batch[key]))
