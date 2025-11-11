@@ -709,10 +709,10 @@ class TrainConfig:
 # Use `get_config` if you need to get a config by name in your 
 _CONFIGS = [
     TrainConfig(
-        name="pi05_place1108",
+        name="pi05_place1111",
         model=pi0_config.Pi0Config(pi05=True, action_horizon=100, discrete_state_input=False, async_action_horizon=1),
         data=LeRobotAsyncBiFlexivDataConfig(
-            repo_id="flexiv/pick_tubes_1108", # change name here
+            repo_id="flexiv/pick_tubes_1111", # change name here
             base_config=DataConfig(prompt_from_task=False),
             extra_delta_transform=True,
         ),
