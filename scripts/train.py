@@ -277,7 +277,9 @@ def main(config: _config.TrainConfig):
         ####### Visualization only for bimanual flexiv #######
         traj_metrics = maybe_save_training_trajectories(
             step, model, train_rng, observation, actions, str(config.checkpoint_dir),
-            save_interval=getattr(config, "plot_interval", 5000), norm_stats_dict=dict(assets_dirs=config.assets_dirs, asset_id=config.data.repo_id, use_quantiles=use_quantiles)
+            save_interval=getattr(config, "plot_interval", 5000), 
+            norm_stats_dict=dict(assets_dirs=config.assets_dirs, asset_id=config.data.repo_id, use_quantiles=use_quantiles),
+            num_train_steps=config.num_train_steps
         )
         #####################################################
         batch = next(data_iter)

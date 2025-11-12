@@ -486,6 +486,7 @@ def maybe_save_training_trajectories(
     checkpoint_dir: Optional[str] = None,
     save_interval: int = 1000,
     norm_stats_dict: Optional[dict] = None,
+    num_train_steps: Optional[int] = None,
 ) -> Dict[str, float]:
     """
     Hook function to maybe save trajectory visualizations during training.
@@ -500,6 +501,9 @@ def maybe_save_training_trajectories(
         observation: Observation data
         actions: Ground truth actions
         checkpoint_dir: Checkpoint directory path
+        save_interval: How often to save (in steps)
+        norm_stats_dict: Normalization stats dictionary
+        num_train_steps: Total number of training steps. If provided, will save at the last step even if it doesn't match save_interval.
         
     Returns:
         Dictionary of trajectory metrics (empty if no visualization saved)
@@ -509,6 +513,15 @@ def maybe_save_training_trajectories(
     if _global_trajectory_visualizer is None:
         # Initialize with default parameters if not already initialized
         initialize_trajectory_visualizer(save_interval=save_interval, norm_stats_dict=norm_stats_dict)
+    
+    # Check if we should save: either at regular intervals or at the last step
+    should_save = _global_trajectory_visualizer.should_save_trajectories(step)
+    if not should_save and num_train_steps is not None and step == num_train_steps - 1:
+        # Force save at the last training step
+        should_save = True
+    
+    if not should_save:
+        return {}
     
     return _global_trajectory_visualizer.maybe_save_trajectories(
         step, model, rng, observation, actions, checkpoint_dir
