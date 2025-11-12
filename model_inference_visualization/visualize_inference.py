@@ -24,6 +24,7 @@ from PIL import Image
 from openpi.training import config as _config
 from openpi.policies import policy_config as _policy_config
 from openpi.policies import bimanual_flexiv_policy
+from openpi.policies import async_biflexiv_policy
 from openpi.shared import download
 
 
@@ -92,9 +93,27 @@ class FlexivTrajectoryVisualizer:
                 episodes=[episode_id]
             )
             
-            # Get BimanualFlexivInputs and BimanualFlexivOutputs transforms
-            flexiv_inputs = bimanual_flexiv_policy.BimanualFlexivInputs(model_type=self.config.model.model_type)
-            flexiv_outputs = bimanual_flexiv_policy.BimanualFlexivOutputs()
+            # Determine which Inputs class to use based on config
+            # Check if config uses LeRobotAsyncBiFlexivDataConfig
+            data_config = self.config.data.create(self.config.assets_dirs, self.config.model)
+            # Check the type name of the data config or the transform class
+            config_type_name = type(self.config.data).__name__
+            is_async = 'AsyncBiFlexiv' in config_type_name or (
+                hasattr(data_config, 'data_transforms') and 
+                any('AsyncBiFlexivInputs' in str(type(t)) for t in data_config.data_transforms.inputs)
+            )
+            
+            if is_async:
+                # Use AsyncBiFlexivInputs for LeRobotAsyncBiFlexivDataConfig
+                flexiv_inputs = async_biflexiv_policy.AsyncBiFlexivInputs(
+                    model_type=self.config.model.model_type,
+                    action_horizon=self.config.model.action_horizon
+                )
+                flexiv_outputs = async_biflexiv_policy.AsyncBiFlexivOutputs()
+            else:
+                # Use BimanualFlexivInputs for other configs
+                flexiv_inputs = bimanual_flexiv_policy.BimanualFlexivInputs(model_type=self.config.model.model_type)
+                flexiv_outputs = bimanual_flexiv_policy.BimanualFlexivOutputs()
             
             samples = []
             dataset_len = len(dataset)
@@ -110,38 +129,51 @@ class FlexivTrajectoryVisualizer:
             
             print(f"Sampling {len(sample_indices)} samples from episode {episode_id}: {sample_indices}")
             
+            # Store previous state for samples that need it
+            prev_state = None
+            
             for i, sample_idx in enumerate(sample_indices):
                 try:
                     # Get raw data from LeRobot dataset
                     raw_data = dataset[sample_idx]
                     
                     # Apply repack transform to match expected format
-                    # Based on LeRobotBimanualFlexivDataConfig repack_transform
+                    # Based on LeRobotAsyncBiFlexivDataConfig repack_transform (no prev_state)
                     repacked_data = {
                         "observation/left_wrist_image": raw_data["left_wrist_image"],
                         "observation/right_wrist_image": raw_data["right_wrist_image"], 
                         "observation/state": raw_data["state"],
-                        "observation/prev_state": raw_data["prev_state"],
                         "actions": raw_data["actions"],
                         "prompt": raw_data.get("task", "pick up object")
                     }
                     
-                    # Apply BimanualFlexivInputs transform (this handles the format conversion)
+                    # Apply transform (this handles the format conversion)
                     transformed_data = flexiv_inputs(repacked_data)
+                    
+                    # Use previous sample's state if available, otherwise use zero state
+                    current_state = transformed_data["state"]
+                    if prev_state is None:
+                        # For first sample, use zero state (same as current state for delta transforms)
+                        sample_prev_state = np.zeros_like(current_state)
+                    else:
+                        sample_prev_state = prev_state
                     
                     # Extract the data for our sample format
                     sample = {
                         'sample_id': sample_idx,
                         'sample_index_in_batch': i,
                         'episode_source_id': episode_id,
-                        'state': transformed_data["state"],
-                        'prev_state': transformed_data["prev_state"],
+                        'state': current_state,
+                        'prev_state': sample_prev_state,
                         'left_wrist_image': transformed_data["image"]["left_wrist_0_rgb"],
                         'right_wrist_image': transformed_data["image"]["right_wrist_0_rgb"],
                         'gt_actions': transformed_data["actions"],
                         'prompt': transformed_data.get("prompt", "pick up object"),
                         'raw_data': raw_data
                     }
+                    
+                    # Update prev_state for next iteration
+                    prev_state = current_state
                     
                     samples.append(sample)
                     print(f"Loaded sample {i+1}/{len(sample_indices)} (dataset index: {sample_idx})")
@@ -167,9 +199,14 @@ class FlexivTrajectoryVisualizer:
             # Create base example
             example = bimanual_flexiv_policy.make_bimanual_flexiv_example()
             
+            # Create dummy prev_state (zero state for delta transforms)
+            state = example["observation/state"]
+            prev_state = np.zeros_like(state)
+            
             sample = {
                 'sample_id': i,
-                'state': example["observation/state"],
+                'state': state,
+                'prev_state': prev_state,
                 'left_wrist_image': example["observation/left_wrist_image"],
                 'right_wrist_image': example["observation/right_wrist_image"],
                 'gt_actions': np.random.randn(self.config.model.action_horizon, 14) * 0.1,
@@ -184,11 +221,14 @@ class FlexivTrajectoryVisualizer:
         # Create input for inference
         obs_input = {
             "observation/state": sample['state'],
-            "observation/prev_state": sample['prev_state'],
             "observation/left_wrist_image": sample['left_wrist_image'],
             "observation/right_wrist_image": sample['right_wrist_image'],
             "prompt": sample['prompt']
         }
+        
+        # Only add prev_state if it exists in sample (for compatibility with different configs)
+        if 'prev_state' in sample and sample['prev_state'] is not None:
+            obs_input["observation/prev_state"] = sample['prev_state']
         
         print(f"Running inference on sample {sample['sample_id']}...")
         
@@ -415,7 +455,10 @@ class FlexivTrajectoryVisualizer:
         """Plot 3D trajectory comparison for left and right hands."""
         gt_actions = sample['gt_actions']
         pred_actions = inference_result['predicted_actions']
-        initial_state = sample['state'] + sample['prev_state']
+        # For delta transforms, state is already in zero state space, so use state directly
+        # For absolute transforms, we might need state + prev_state, but for visualization
+        # we'll use the current state as initial position
+        initial_state = sample['state'] if 'prev_state' not in sample or sample['prev_state'] is None else sample['state'] + sample['prev_state']
         sample_id = sample['sample_id']
         
         # Convert to numpy arrays if needed
@@ -721,7 +764,8 @@ class FlexivTrajectoryVisualizer:
             inference_result = sample['inference_result']
             gt_actions = sample['gt_actions']
             pred_actions = inference_result['predicted_actions']
-            initial_state = sample['state'] + sample['prev_state']
+            # For delta transforms, state is already in zero state space, so use state directly
+            initial_state = sample['state'] if 'prev_state' not in sample or sample['prev_state'] is None else sample['state'] + sample['prev_state']
             frame_id = sample.get('sample_id', sample_idx)
             
             # Convert to numpy arrays if needed
@@ -926,8 +970,31 @@ def main():
         checkpoint_path = download.maybe_download(args.checkpoint)
     else:
         checkpoint_path = args.checkpoint
-    output_dir = os.path.join('output_images', args.output_dir)
+    
+    # Extract checkpoint step from path for better organization
+    checkpoint_step = None
+    checkpoint_path_obj = pathlib.Path(checkpoint_path)
+    if checkpoint_path_obj.exists() and checkpoint_path_obj.is_dir():
+        # Try to extract step number from directory name (e.g., "29999" from "checkpoints/.../29999")
+        dir_name = checkpoint_path_obj.name
+        if dir_name.isdigit():
+            checkpoint_step = dir_name
+        # Also check parent directory
+        elif checkpoint_path_obj.parent.name.isdigit():
+            checkpoint_step = checkpoint_path_obj.parent.name
+    
+    # Include checkpoint step in output directory name if available
+    if checkpoint_step:
+        output_dir_name = f"{args.output_dir}_step_{checkpoint_step}"
+    else:
+        output_dir_name = args.output_dir
+    
+    output_dir = os.path.join('output_images', output_dir_name)
     os.makedirs(output_dir, exist_ok=True)
+    
+    print(f"Visualization results will be saved to: {output_dir}")
+    if checkpoint_step:
+        print(f"Using checkpoint from step: {checkpoint_step}")
     # Create visualizer
     visualizer = FlexivTrajectoryVisualizer(
         config_name=args.config,
