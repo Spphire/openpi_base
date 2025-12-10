@@ -1,0 +1,17 @@
+data:
+  - "data/tableware/replay_buffer.zarr"
+task:
+  - "place the fork, knife, and spoon in the correct positions in order"
+features:
+  left_wrist_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  state:
+    dtype: "float32"
+    shape: [7,] 
+    names: ["state"]
+  actions:
+    dtype: "float32"
+    shape: [7,]
+    names: ["actions"]
