@@ -226,10 +226,9 @@ class DeltaActions(DataTransformFn):
 class iPhoneZeroStateAndRealRelativeActions(DataTransformFn):
     """Repacks absolute state and actions into zero state and relative actions space."""
 
-    # Boolean mask for the action dimensions to be repacked into delta action space. Length
-    # can be smaller than the actual number of dimensions. If None, this transform is a no-op.
-    # See `make_bool_mask` for more details.
     bimanual: bool = False
+    gravity_anchored_relative_actions: bool = False
+    gravity_axis: str = "y"
 
     def array_to_pose_and_gripper(self, x):
         # convert single arm array to pose and gripper
@@ -240,19 +239,43 @@ class iPhoneZeroStateAndRealRelativeActions(DataTransformFn):
         pose = np.concatenate([pos, axis_angle], axis=1)
         pose_mat = dsl.pose_to_mat(pose) # pos, axis_angle -> mat
         return pose_mat, grip
+    
+    def gravity_anchored_state_pose_mat(self, pose_mat):
+        pose_mat = pose_mat.copy()
+        rot = pose_mat[:,:3,:3]
+        if self.gravity_axis == "x":
+            rot = Rotation.from_matrix(rot).as_euler('yzx')
+            rot[:,:2] = 0
+            rot = Rotation.from_euler('yzx', rot).as_matrix()
+        elif self.gravity_axis == "y":
+            rot = Rotation.from_matrix(rot).as_euler('xzy')
+            rot[:,:2] = 0
+            rot = Rotation.from_euler('xzy', rot).as_matrix()
+        elif self.gravity_axis == "z":
+            rot = Rotation.from_matrix(rot).as_euler('xyz')
+            rot[:,:2] = 0
+            rot = Rotation.from_euler('xyz', rot).as_matrix()
+        else:
+            raise ValueError(f"Invalid gravity axis: {self.gravity_axis}")
+        pose_mat[:,:3,:3] = rot
+        return pose_mat
 
     def __call__(self, data: DataDict) -> DataDict:
         state = data["state"]
         if "actions" in data:
-            state_left_pose_mat, state_left_grip = self.array_to_pose_and_gripper(state)
-            action_left_pose_mat, action_left_grip = self.array_to_pose_and_gripper(data["actions"])
+            state_left_pose_mat, state_left_grip = self.array_to_pose_and_gripper(state[:,:7])
+            if self.gravity_anchored_relative_actions:
+                state_left_pose_mat = self.gravity_anchored_state_pose_mat(state_left_pose_mat)
+            action_left_pose_mat, action_left_grip = self.array_to_pose_and_gripper(data["actions"][:,:7])
             action_left_relative_pose_mat = dsl.convert_pose_mat_rep(action_left_pose_mat, state_left_pose_mat[0], "relative")
             action_left_relative_rpy = Rotation.from_matrix(action_left_relative_pose_mat[:,:3,:3]).as_euler('xyz', degrees=False)
             action_left_relative_pos = action_left_relative_pose_mat[:,:3,3]
             action_left = np.concatenate([action_left_relative_pos, action_left_relative_rpy, action_left_grip], axis=1)
             if self.bimanual:
-                state_right_pose_mat, state_right_grip = self.array_to_pose_and_gripper(state[1:])
-                action_right_pose_mat, action_right_grip = self.array_to_pose_and_gripper(data["actions"][1:])
+                state_right_pose_mat, state_right_grip = self.array_to_pose_and_gripper(state[:,:7])
+                if self.gravity_anchored_relative_actions:
+                    state_right_pose_mat = self.gravity_anchored_state_pose_mat(state_right_pose_mat)
+                action_right_pose_mat, action_right_grip = self.array_to_pose_and_gripper(data["actions"][:,:7])
                 action_right_relative_pose_mat = dsl.convert_pose_mat_rep(action_right_pose_mat, state_right_pose_mat[0], "relative")
                 action_right_relative_rpy = Rotation.from_matrix(action_right_relative_pose_mat[:,:3,:3]).as_euler('xyz', degrees=False)
                 action_right_relative_pos = action_right_relative_pose_mat[:,:3,3]

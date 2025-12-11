@@ -1,0 +1,21 @@
+data:
+  - "data/debug_bimanual/replay_buffer.zarr"
+task:
+  - "debug bimanual iphone zarr"
+features:
+  left_wrist_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  right_wrist_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  state:
+    dtype: "float32"
+    shape: [14,] 
+    names: ["state"]
+  actions:
+    dtype: "float32"
+    shape: [14,]
+    names: ["actions"]

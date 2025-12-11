@@ -77,7 +77,6 @@ class Converter:
     def read_dataset(self, dataset_path):
         src_root = zarr.group(dataset_path)
         meta = dict()
-        meta = dict()
         for key, value in src_root['meta'].items():
             if len(value.shape) == 0:
                 meta[key] = np.array(value)
