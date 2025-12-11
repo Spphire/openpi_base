@@ -394,7 +394,7 @@ class LeRobotSingleiPhoneFlexivDataConfig(DataConfigFactory):
                 _transforms.RepackTransform(
                     {
                         "observation/state": "state",
-                        "observation/left_wrist_img": "left_wrist_img",
+                        "observation/left_wrist_image": "left_wrist_img",
                         "actions": "actions",
                         "prompt": "task",
                     }
