@@ -263,7 +263,7 @@ class iPhoneZeroStateAndRealRelativeActions(DataTransformFn):
     def __call__(self, data: DataDict) -> DataDict:
         state = data["state"]
         if "actions" in data:
-            state_left_pose_mat, state_left_grip = self.array_to_pose_and_gripper(state[:,:7])
+            state_left_pose_mat, state_left_grip = self.array_to_pose_and_gripper(state[...,:7])
             if self.gravity_anchored_relative_actions:
                 state_left_pose_mat = self.gravity_anchored_state_pose_mat(state_left_pose_mat)
             action_left_pose_mat, action_left_grip = self.array_to_pose_and_gripper(data["actions"][:,:7])
@@ -272,7 +272,7 @@ class iPhoneZeroStateAndRealRelativeActions(DataTransformFn):
             action_left_relative_pos = action_left_relative_pose_mat[:,:3,3]
             action_left = np.concatenate([action_left_relative_pos, action_left_relative_rpy, action_left_grip], axis=1)
             if self.bimanual:
-                state_right_pose_mat, state_right_grip = self.array_to_pose_and_gripper(state[:,:7])
+                state_right_pose_mat, state_right_grip = self.array_to_pose_and_gripper(state[...,:7])
                 if self.gravity_anchored_relative_actions:
                     state_right_pose_mat = self.gravity_anchored_state_pose_mat(state_right_pose_mat)
                 action_right_pose_mat, action_right_grip = self.array_to_pose_and_gripper(data["actions"][:,:7])

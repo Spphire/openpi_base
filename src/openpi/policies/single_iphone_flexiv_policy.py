@@ -11,7 +11,7 @@ def make_single_iphone_flexiv_example() -> dict:
     """Creates a random input example for the Libero policy."""
     return {
         "observation/state": np.random.rand(7),
-        "observation/left_wrist_img": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
+        "observation/left_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "actions": np.random.rand(7),
         "prompt": "do something",
     }
@@ -40,7 +40,7 @@ class SingleiPhoneFlexivInputs(transforms.DataTransformFn):
     model_type: _model.ModelType
 
     def __call__(self, data: dict) -> dict:
-        left_wrist_image = _parse_image(data["observation/left_wrist_img"])
+        left_wrist_image = _parse_image(data["observation/left_wrist_image"])
 
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {
