@@ -272,10 +272,10 @@ class iPhoneZeroStateAndRealRelativeActions(DataTransformFn):
             action_left_relative_pos = action_left_relative_pose_mat[:,:3,3]
             action_left = np.concatenate([action_left_relative_pos, action_left_relative_rpy, action_left_grip], axis=1)
             if self.bimanual:
-                state_right_pose_mat, state_right_grip = self.array_to_pose_and_gripper(state[...,:7])
+                state_right_pose_mat, state_right_grip = self.array_to_pose_and_gripper(state[...,7:14])
                 if self.gravity_anchored_relative_actions:
                     state_right_pose_mat = self.gravity_anchored_state_pose_mat(state_right_pose_mat)
-                action_right_pose_mat, action_right_grip = self.array_to_pose_and_gripper(data["actions"][:,:7])
+                action_right_pose_mat, action_right_grip = self.array_to_pose_and_gripper(data["actions"][:,7:14])
                 action_right_relative_pose_mat = dsl.convert_pose_mat_rep(action_right_pose_mat, state_right_pose_mat[0], "relative")
                 action_right_relative_rpy = Rotation.from_matrix(action_right_relative_pose_mat[:,:3,:3]).as_euler('xyz', degrees=False)
                 action_right_relative_pos = action_right_relative_pose_mat[:,:3,3]
