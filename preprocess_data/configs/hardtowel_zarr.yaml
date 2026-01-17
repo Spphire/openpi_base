@@ -1,0 +1,17 @@
+data:
+  - "/home/wendi/Desktop/umi_base/.cache/cloud_pick_and_place_image_dataset/hardtowel_660/replay_buffer.zarr"
+task:
+  - "Smooth the towel flat, and fold it into a triangle."
+features:
+  left_wrist_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  state:
+    dtype: "float32"
+    shape: [7,] 
+    names: ["state"]
+  actions:
+    dtype: "float32"
+    shape: [7,]
+    names: ["actions"]
