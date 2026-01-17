@@ -14,6 +14,7 @@ from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME
 from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 import numpy as np
 from scipy.spatial.transform import Rotation
+from tqdm import tqdm
 
 def normalize_vector(v: np.ndarray) -> np.ndarray:
     v_mag = np.linalg.norm(v)
@@ -107,7 +108,7 @@ class Converter:
             episode_ends = replay_buffer.episode_ends[:]
             episode_start = [0] + list(episode_ends)
             num_episodes_zarr = len(episode_ends)
-            for episode_id in range(num_episodes_zarr):
+            for episode_id in tqdm(range(num_episodes_zarr), desc="Processing episodes"):
                 try:
                     start_idx = episode_start[episode_id]
                     end_idx = episode_ends[episode_id]
