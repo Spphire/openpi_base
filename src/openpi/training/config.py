@@ -833,6 +833,14 @@ class OnlineDaggerTrainConfig:
     max_online_ratio: float = 0.8  # Maximum online sampling weight
     initial_online_weight: float = 0.5  # Initial online weight
 
+    # Checkpoint sync parameters for DAgger backend
+    inference_server_url: str = ""  # URL of the DAgger backend server (e.g., "http://localhost:8080")
+    sync_interval: int = 100  # Push checkpoint to inference server every N steps
+    base_workspace_config: str = ""  # Workspace config name for session matching
+    base_task_config: str = ""  # Task config name for session matching
+    sync_timeout: int = 120  # Timeout for checkpoint sync requests
+    sync_retries: int = 3  # Number of retries for checkpoint sync
+
 # Use `get_config` if you need to get a config by name in your 
 _CONFIGS = [
     TrainConfig(

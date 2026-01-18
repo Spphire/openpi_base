@@ -47,22 +47,41 @@ MIN_ONLINE_RATIO=0.2
 MAX_ONLINE_RATIO=0.8
 INITIAL_ONLINE_WEIGHT=0.5
 
+# Checkpoint sync settings for DAgger backend
+# Set INFERENCE_SERVER_URL to enable checkpoint sync (e.g., "http://localhost:8080")
+# Leave empty to disable checkpoint sync
+INFERENCE_SERVER_URL=""
+SYNC_INTERVAL=1000  # Sync checkpoint every N steps
+BASE_WORKSPACE_CONFIG=""  # Leave empty to use CONFIG_NAME
+BASE_TASK_CONFIG=""  # Leave empty to use TASK_DESCRIPTION
+SYNC_TIMEOUT=120
+SYNC_RETRIES=3
+
 # GPU settings
 export XLA_PYTHON_CLIENT_MEM_FRACTION=0.95
 USED_GPUS=0,1,2,3
 
 # Run training
 CUDA_VISIBLE_DEVICES=${USED_GPUS} python scripts/train_online_dagger.py \
+    \
+    `# === Training config ===` \
     --config-name=${CONFIG_NAME} \
     --exp-name=${EXP_NAME} \
     --init-checkpoint=${INIT_CHECKPOINT} \
+    --overwrite \
+    \
+    `# === Data cloud settings ===` \
     --online-repo-id=${ONLINE_REPO_ID} \
     --datacloud-endpoint=${DATACLOUD_ENDPOINT} \
     --identifier=${DAGGER_IDENTIFIER} \
     --fetch-interval=${FETCH_INTERVAL} \
+    \
+    `# === Robot configuration ===` \
     --robot-type=${ROBOT_TYPE} \
     --fps=${FPS} \
     --task-description="${TASK_DESCRIPTION}" \
+    \
+    `# === Zarr configs ===` \
     --action-type=${ACTION_TYPE} \
     --temporal-downsample-ratio=${TEMPORAL_DOWNSAMPLE_RATIO} \
     --use-dino \
@@ -70,9 +89,18 @@ CUDA_VISIBLE_DEVICES=${USED_GPUS} python scripts/train_online_dagger.py \
     --episode-clip-tail-seconds=${EPISODE_CLIP_TAIL_SECONDS} \
     --gripper-width-bias=${GRIPPER_WIDTH_BIAS} \
     --gripper-width-scale=${GRIPPER_WIDTH_SCALE} \
+    \
+    `# === Adaptive sampling parameters ===` \
     --window-size=${WINDOW_SIZE} \
     --boost-factor=${BOOST_FACTOR} \
     --min-online-ratio=${MIN_ONLINE_RATIO} \
     --max-online-ratio=${MAX_ONLINE_RATIO} \
     --initial-online-weight=${INITIAL_ONLINE_WEIGHT} \
-    --overwrite
+    \
+    `# === Checkpoint sync settings ===` \
+    --inference-server-url=${INFERENCE_SERVER_URL} \
+    --sync-interval=${SYNC_INTERVAL} \
+    --base-workspace-config=${BASE_WORKSPACE_CONFIG} \
+    --base-task-config=${BASE_TASK_CONFIG} \
+    --sync-timeout=${SYNC_TIMEOUT} \
+    --sync-retries=${SYNC_RETRIES}

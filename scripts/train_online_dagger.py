@@ -40,6 +40,7 @@ import openpi.training.sharding as sharding
 import openpi.training.utils as training_utils
 import openpi.training.weight_loaders as _weight_loaders
 from openpi.training.online_data_fetcher import OnlineDataFetcher
+from openpi.training.checkpoint_sync import CheckpointSyncServer
 
 
 def init_logging():
@@ -361,6 +362,19 @@ def main(args: _config.OnlineDaggerTrainConfig):
         gripper_width_scale=online_config.gripper_width_scale,
     )
 
+    # Initialize checkpoint sync server (if configured)
+    checkpoint_sync = None
+    if online_config.inference_server_url:
+        checkpoint_sync = CheckpointSyncServer(
+            inference_server_url=online_config.inference_server_url,
+            timeout=online_config.sync_timeout,
+            max_retries=online_config.sync_retries,
+        )
+        if checkpoint_sync.check_server_health():
+            logging.info(f"Connected to inference server at {online_config.inference_server_url}")
+        else:
+            logging.warning(f"Inference server at {online_config.inference_server_url} is not reachable")
+
     train_state, train_state_sharding = init_train_state(config, init_rng, mesh, resume=resuming)
     jax.block_until_ready(train_state)
     logging.info(f"Initialized train state:\n{training_utils.array_tree_to_info(train_state.params)}")
@@ -450,6 +464,39 @@ def main(args: _config.OnlineDaggerTrainConfig):
 
         if (step % config.save_interval == 0 and step > start_step) or step == config.num_train_steps - 1:
             _checkpoints.save_state(checkpoint_manager, train_state, data_loader, step)
+
+        # Sync checkpoint to inference server
+        if (
+            checkpoint_sync is not None
+            and online_config.sync_interval > 0
+            and step > 0
+            and step % online_config.sync_interval == 0
+        ):
+            # Get the latest checkpoint path
+            latest_step = checkpoint_manager.latest_step()
+            if latest_step is not None:
+                checkpoint_path = config.checkpoint_dir / str(latest_step)
+                workspace_config = online_config.base_workspace_config or config.name
+                task_config = online_config.base_task_config or online_config.task_description
+
+                logging.info(f"Syncing checkpoint to inference server at step {step}")
+                success = checkpoint_sync.push_checkpoint(
+                    checkpoint_path=str(checkpoint_path),
+                    workspace_config=workspace_config,
+                    task_config=task_config,
+                    metadata={
+                        "global_step": step,
+                        "online_weight": hybrid_dataset.adaptive_sampler.online_weight,
+                    },
+                )
+                if success:
+                    logging.info(f"Checkpoint synced successfully at step {step}")
+                else:
+                    logging.warning(f"Failed to sync checkpoint at step {step}")
+
+    # Clean up checkpoint sync
+    if checkpoint_sync is not None:
+        checkpoint_sync.close()
 
     logging.info("Waiting for checkpoint manager to finish")
     checkpoint_manager.wait_until_finished()
