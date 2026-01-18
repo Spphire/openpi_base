@@ -2,18 +2,22 @@ from collections.abc import Iterator, Sequence
 import logging
 import multiprocessing
 import os
+import shutil
 import typing
 from typing import Literal, Protocol, SupportsIndex, TypeVar
 
 import jax
 import jax.numpy as jnp
 import lerobot.common.datasets.lerobot_dataset as lerobot_dataset
+from lerobot.common.datasets.lerobot_dataset import HF_LEROBOT_HOME, LeRobotDataset, LeRobotDatasetMetadata
+from lerobot.common.datasets.utils import get_delta_indices, get_episode_data_index
 import numpy as np
 import torch
 
 import openpi.models.model as _model
 import openpi.training.config as _config
 from openpi.training.droid_rlds_dataset import DroidRldsDataset
+from openpi.training.online_data_fetcher import AdaptiveSampler
 import openpi.transforms as _transforms
 
 T_co = TypeVar("T_co", covariant=True)
@@ -539,3 +543,416 @@ class DataLoaderImpl(DataLoader):
     def __iter__(self):
         for batch in self._data_loader:
             yield _model.Observation.from_dict(batch), batch["actions"]
+
+
+# ============================================================================
+# HybridDataset and HybridDataLoader for Online DAgger Training
+# ============================================================================
+
+
+class HybridDataset(Dataset):
+    """
+    A dataset that combines offline and online LeRobot datasets with adaptive sampling.
+
+    Features:
+    - Loads an existing offline LeRobot dataset
+    - Dynamically maintains an online LeRobot dataset
+    - Integrates AdaptiveSampler for loss-based sampling weight adjustment
+    - Provides append_episodes() interface for adding new data
+    - Supports sampling by source (online/offline)
+    """
+
+    def __init__(
+        self,
+        offline_repo_id: str,
+        online_repo_id: str,
+        action_horizon: int,
+        action_sequence_keys: Sequence[str] = ("actions",),
+        prompt_from_task: bool = False,
+        # Adaptive sampling parameters
+        window_size: int = 200,
+        boost_factor: float = 1.5,
+        min_online_ratio: float = 0.2,
+        max_online_ratio: float = 0.8,
+        initial_online_weight: float = 0.5,
+        # Online dataset creation parameters
+        robot_type: str = "single_iphone_flexiv",
+        fps: int = 10,
+        features: dict | None = None,
+        seed: int = 0,
+    ):
+        self._offline_repo_id = offline_repo_id
+        self._online_repo_id = online_repo_id
+        self._action_horizon = action_horizon
+        self._action_sequence_keys = action_sequence_keys
+        self._prompt_from_task = prompt_from_task
+        self._rng = np.random.default_rng(seed)
+
+        # Load offline dataset
+        offline_meta = LeRobotDatasetMetadata(offline_repo_id)
+        self._offline_dataset = LeRobotDataset(
+            offline_repo_id,
+            delta_timestamps={key: [t / offline_meta.fps for t in range(action_horizon)] for key in action_sequence_keys},
+        )
+        self._offline_tasks = offline_meta.tasks if prompt_from_task else None
+
+        # Store features from offline dataset or use provided features
+        if features is None:
+            features = self._get_features_from_offline_dataset()
+        self._features = features
+        self._robot_type = robot_type
+        self._fps = fps
+
+        # Build delta_timestamps for online dataset (same as offline)
+        self._delta_timestamps = {key: [t / fps for t in range(action_horizon)] for key in action_sequence_keys}
+
+        # Delete existing online dataset if it exists (online dataset should be built fresh during training)
+        online_path = HF_LEROBOT_HOME / online_repo_id
+        if online_path.exists():
+            logging.info(f"Removing existing online dataset at {online_path}")
+            shutil.rmtree(online_path)
+
+        # Create online dataset (initially empty)
+        self._online_dataset = LeRobotDataset.create(
+            repo_id=online_repo_id,
+            robot_type=robot_type,
+            fps=fps,
+            features=features,
+            image_writer_threads=4,
+            image_writer_processes=2,
+        )
+
+        # Initialize adaptive sampler
+        self._adaptive_sampler = AdaptiveSampler(
+            window_size=window_size,
+            boost_factor=boost_factor,
+            min_online_ratio=min_online_ratio,
+            max_online_ratio=max_online_ratio,
+            initial_online_weight=initial_online_weight,
+        )
+
+        self._online_episodes_count = 0
+
+    def _get_features_from_offline_dataset(self) -> dict:
+        """Extract features configuration from offline dataset metadata."""
+        # Default features based on common patterns
+        return {
+            "left_wrist_img": {"dtype": "image", "shape": (224, 224, 3), "names": ["height", "width", "channel"]},
+            "state": {"dtype": "float32", "shape": (7,), "names": ["state"]},
+            "actions": {"dtype": "float32", "shape": (7,), "names": ["actions"]},
+        }
+
+    def append_episodes(self, episodes_data: list[dict[str, np.ndarray]], task: str = "") -> None:
+        """
+        Append new episodes to the online dataset.
+
+        Args:
+            episodes_data: List of episode data dicts, each containing
+                          arrays for each key with shape (T, ...)
+            task: Task description for these episodes
+        """
+        for episode_data in episodes_data:
+            num_frames = None
+            for key in self._features:
+                if key in episode_data:
+                    if num_frames is None:
+                        num_frames = episode_data[key].shape[0]
+                    break
+
+            if num_frames is None:
+                logging.warning("No valid data found in episode, skipping")
+                continue
+
+            for step in range(num_frames):
+                frame_dict = {}
+                for feat in self._features:
+                    if feat in episode_data:
+                        frame_dict[feat] = episode_data[feat][step]
+                frame_dict["task"] = task or episode_data.get("task", "")
+                self._online_dataset.add_frame(frame_dict)
+
+            self._online_dataset.save_episode()
+            self._online_episodes_count += 1
+
+        # Update delta_timestamps, delta_indices and episode_data_index for online dataset
+        self._online_dataset.delta_timestamps = self._delta_timestamps
+        self._online_dataset.delta_indices = get_delta_indices(self._delta_timestamps, self._fps)
+        self._online_dataset.episode_data_index = get_episode_data_index(
+            self._online_dataset.meta.episodes, self._online_dataset.episodes
+        )
+
+        logging.info(f"Online dataset updated: {self._online_episodes_count} episodes, {len(self._online_dataset)} samples")
+
+    @property
+    def offline_len(self) -> int:
+        return len(self._offline_dataset)
+
+    @property
+    def online_len(self) -> int:
+        return len(self._online_dataset)
+
+    def __len__(self) -> int:
+        return self.offline_len + self.online_len
+
+    def __getitem__(self, index: SupportsIndex) -> dict:
+        """Standard getitem - uses unified indexing across both datasets."""
+        idx = index.__index__()
+        if idx < self.offline_len:
+            item = self._offline_dataset[idx]
+        else:
+            online_idx = idx - self.offline_len
+            if online_idx < self.online_len:
+                item = self._online_dataset[online_idx]
+            else:
+                item = self._offline_dataset[idx % self.offline_len]
+
+        if self._prompt_from_task and self._offline_tasks:
+            item = _transforms.PromptFromLeRobotTask(self._offline_tasks)(item)
+
+        return item
+
+    def get_item_by_source(self, is_online: bool, idx: int) -> dict:
+        """Get item from specific source (online or offline)."""
+        if is_online and self.online_len > 0:
+            item = self._online_dataset[idx % self.online_len]
+        else:
+            item = self._offline_dataset[idx % self.offline_len]
+
+        if self._prompt_from_task and self._offline_tasks:
+            item = _transforms.PromptFromLeRobotTask(self._offline_tasks)(item)
+
+        return item
+
+    def sample_batch_indices(self, batch_size: int, replace: bool = False) -> list[tuple[bool, int]]:
+        """
+        Sample batch indices using adaptive sampling weights.
+
+        Returns list of (is_online, idx) tuples.
+        """
+        if self.online_len == 0:
+            # Only offline data available
+            if not replace and batch_size <= self.offline_len:
+                indices = self._rng.choice(self.offline_len, size=batch_size, replace=False)
+            else:
+                indices = self._rng.integers(0, self.offline_len, size=batch_size)
+            return [(False, int(idx)) for idx in indices]
+
+        online_weight = self._adaptive_sampler.online_weight
+
+        n_online = int(batch_size * online_weight)
+        n_offline = batch_size - n_online
+
+        # Sample online indices
+        if n_online > 0:
+            if not replace and n_online <= self.online_len:
+                online_indices = self._rng.choice(self.online_len, size=n_online, replace=False)
+            else:
+                online_indices = self._rng.integers(0, self.online_len, size=n_online)
+        else:
+            online_indices = np.array([], dtype=np.int64)
+
+        # Sample offline indices
+        if n_offline > 0:
+            if not replace and n_offline <= self.offline_len:
+                offline_indices = self._rng.choice(self.offline_len, size=n_offline, replace=False)
+            else:
+                offline_indices = self._rng.integers(0, self.offline_len, size=n_offline)
+        else:
+            offline_indices = np.array([], dtype=np.int64)
+
+        batch = [(True, int(idx)) for idx in online_indices] + [(False, int(idx)) for idx in offline_indices]
+        self._rng.shuffle(batch)
+        return batch
+
+    @property
+    def adaptive_sampler(self):
+        return self._adaptive_sampler
+
+    @property
+    def online_episodes_count(self) -> int:
+        return self._online_episodes_count
+
+    @property
+    def offline_episodes_count(self) -> int:
+        return self._offline_dataset.meta.total_episodes
+
+    def get_sampling_stats(self) -> dict:
+        return self._adaptive_sampler.get_stats()
+
+
+class HybridDataLoader:
+    """
+    Data loader for HybridDataset that supports adaptive sampling between online and offline data.
+    """
+
+    def __init__(
+        self,
+        dataset: HybridDataset,
+        transforms: Sequence[_transforms.DataTransformFn],
+        local_batch_size: int,
+        *,
+        sharding: jax.sharding.Sharding | None = None,
+        num_batches: int | None = None,
+        seed: int = 0,
+    ):
+        self._dataset = dataset
+        self._transform = _transforms.compose(transforms)
+        self._local_batch_size = local_batch_size
+        self._num_batches = num_batches
+        self._rng = np.random.default_rng(seed)
+
+        if jax.process_count() > 1:
+            raise NotImplementedError("Data loading with multiple processes is not supported.")
+
+        if sharding is None:
+            sharding = jax.sharding.NamedSharding(
+                jax.sharding.Mesh(jax.devices(), ("B",)),
+                jax.sharding.PartitionSpec("B"),
+            )
+        self._sharding = sharding
+
+    def __iter__(self):
+        num_items = 0
+        while True:
+            if self._num_batches is not None and num_items >= self._num_batches:
+                return
+
+            # Sample batch indices using adaptive sampling
+            batch_indices = self._dataset.sample_batch_indices(self._local_batch_size, replace=False)
+
+            # Collect batch data and track sources
+            batch_data = []
+            batch_is_online = []
+            for is_online, idx in batch_indices:
+                item = self._dataset.get_item_by_source(is_online, idx)
+                item = self._transform(item)
+                batch_data.append(item)
+                batch_is_online.append(is_online)
+
+            # Stack batch
+            batch = jax.tree.map(lambda *xs: np.stack([np.asarray(x) for x in xs], axis=0), *batch_data)
+            batch["_is_online"] = np.array(batch_is_online, dtype=np.bool_)
+
+            num_items += 1
+            yield jax.tree.map(lambda x: jax.make_array_from_process_local_data(self._sharding, x), batch)
+
+    @property
+    def dataset(self) -> HybridDataset:
+        return self._dataset
+
+
+class HybridDataLoaderImpl(DataLoader):
+    """Wrapper for HybridDataLoader that implements the DataLoader protocol."""
+
+    def __init__(self, data_config: _config.DataConfig, data_loader: HybridDataLoader):
+        self._data_config = data_config
+        self._data_loader = data_loader
+
+    def data_config(self) -> _config.DataConfig:
+        return self._data_config
+
+    @property
+    def dataset(self) -> HybridDataset:
+        return self._data_loader.dataset
+
+    def __iter__(self):
+        for batch in self._data_loader:
+            is_online = batch.pop("_is_online", None)
+            observation = _model.Observation.from_dict(batch)
+            actions = batch["actions"]
+            if is_online is not None:
+                yield observation, actions, is_online
+            else:
+                yield observation, actions
+
+
+def create_hybrid_data_loader(
+    config: _config.TrainConfig,
+    online_repo_id: str,
+    *,
+    sharding: jax.sharding.Sharding | None = None,
+    num_batches: int | None = None,
+    # Adaptive sampling parameters
+    window_size: int = 200,
+    boost_factor: float = 1.5,
+    min_online_ratio: float = 0.2,
+    max_online_ratio: float = 0.8,
+    initial_online_weight: float = 0.5,
+    # Online dataset parameters
+    robot_type: str = "single_iphone_flexiv",
+    fps: int = 10,
+    features: dict | None = None,
+) -> HybridDataLoaderImpl:
+    """
+    Create a hybrid data loader for online DAgger training.
+
+    Args:
+        config: The training configuration (contains offline repo_id).
+        online_repo_id: The repo ID for the online dataset.
+        sharding: The sharding to use for the data loader.
+        num_batches: Number of batches to return.
+        window_size: Window size for adaptive sampling.
+        boost_factor: Boost factor for online data.
+        min_online_ratio: Minimum online sampling ratio.
+        max_online_ratio: Maximum online sampling ratio.
+        initial_online_weight: Initial online sampling weight.
+        robot_type: Robot type for online dataset.
+        fps: FPS for online dataset.
+        features: Features configuration for online dataset.
+    """
+    data_config = config.data.create(config.assets_dirs, config.model)
+    logging.info(f"Creating hybrid data loader with offline repo: {data_config.repo_id}, online repo: {online_repo_id}")
+
+    action_horizon = (
+        config.model.async_action_horizon if getattr(config.model, "async_action_horizon", -1) > 0 else config.model.action_horizon
+    )
+
+    # Create hybrid dataset
+    dataset = HybridDataset(
+        offline_repo_id=data_config.repo_id,
+        online_repo_id=online_repo_id,
+        action_horizon=action_horizon,
+        action_sequence_keys=data_config.action_sequence_keys,
+        prompt_from_task=data_config.prompt_from_task,
+        window_size=window_size,
+        boost_factor=boost_factor,
+        min_online_ratio=min_online_ratio,
+        max_online_ratio=max_online_ratio,
+        initial_online_weight=initial_online_weight,
+        robot_type=robot_type,
+        fps=fps,
+        features=features,
+        seed=config.seed,
+    )
+
+    # Get normalization stats
+    norm_stats = {}
+    if data_config.repo_id != "fake":
+        if data_config.norm_stats is None:
+            raise ValueError(
+                "Normalization stats not found. "
+                "Make sure to run `scripts/compute_norm_stats.py --config-name=<your-config>`."
+            )
+        norm_stats = data_config.norm_stats
+
+    # Build transforms
+    transforms = [
+        *data_config.repack_transforms.inputs,
+        *data_config.data_transforms.inputs,
+        _transforms.Normalize(norm_stats, use_quantiles=data_config.use_quantile_norm),
+        *data_config.model_transforms.inputs,
+    ]
+
+    local_batch_size = config.batch_size // jax.process_count()
+    logging.info(f"Hybrid data loader local_batch_size: {local_batch_size}")
+
+    data_loader = HybridDataLoader(
+        dataset=dataset,
+        transforms=transforms,
+        local_batch_size=local_batch_size,
+        sharding=sharding,
+        num_batches=num_batches,
+        seed=config.seed,
+    )
+
+    return HybridDataLoaderImpl(data_config, data_loader)

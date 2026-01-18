@@ -18,6 +18,10 @@
 imagecodecs==2023.9.18
 zarr==2.16.1
 numcodecs==0.11.0
+# for dagger
+lz4
+pymongo
+transforms3d
 ```
 1. 数据转换：
 ```shell

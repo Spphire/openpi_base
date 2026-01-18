@@ -39,6 +39,63 @@ def ortho6d_to_matrix(ortho6d: np.ndarray) -> np.ndarray:
 def matrix_to_rotvec(rot):
     return Rotation.from_matrix(rot).as_rotvec()
 
+
+def convert_episode_to_lerobot_format(
+    episode_data: dict,
+    robot_type: str,
+    task: str = "",
+) -> dict:
+    """
+    Convert raw episode data to LeRobot-compatible format.
+    
+    Args:
+        episode_data: Dict containing raw episode data with keys like 
+                      'left_robot_tcp_pose', 'left_robot_gripper_width', 
+                      'left_wrist_img', etc.
+        robot_type: Either "single_iphone_flexiv" or "bimanual_iphone_flexiv"
+        task: Task description string
+    
+    Returns:
+        Dict with converted data including 'state', 'actions', and image keys
+    """
+    result = {}
+    
+    # Process left arm data
+    left_pose_9d = episode_data["left_robot_tcp_pose"]
+    left_pose = np.zeros((left_pose_9d.shape[0], 6), dtype=np.float32)
+    for i in range(left_pose.shape[0]):
+        left_pose[i][:3] = left_pose_9d[i][:3]
+        left_pose[i][3:] = matrix_to_rotvec(ortho6d_to_matrix(left_pose_9d[i][3:9]))
+    left_gripper_width = episode_data["left_robot_gripper_width"]
+    left_state = np.concatenate([left_pose, left_gripper_width], axis=1)
+    
+    if robot_type == "single_iphone_flexiv":
+        state = left_state
+    else:
+        # Process right arm data for bimanual
+        right_pose_9d = episode_data["right_robot_tcp_pose"]
+        right_pose = np.zeros((right_pose_9d.shape[0], 6), dtype=np.float32)
+        for i in range(right_pose.shape[0]):
+            right_pose[i][:3] = right_pose_9d[i][:3]
+            right_pose[i][3:] = matrix_to_rotvec(ortho6d_to_matrix(right_pose_9d[i][3:9]))
+        right_gripper_width = episode_data["right_robot_gripper_width"]
+        right_state = np.concatenate([right_pose, right_gripper_width], axis=1)
+        state = np.concatenate([left_state, right_state], axis=1)
+    
+    result["state"] = state.astype(np.float32)
+    result["actions"] = state.astype(np.float32).copy()
+    
+    # Copy image data
+    if "left_wrist_img" in episode_data:
+        result["left_wrist_img"] = episode_data["left_wrist_img"]
+    if "right_wrist_img" in episode_data:
+        result["right_wrist_img"] = episode_data["right_wrist_img"]
+    
+    result["task"] = task
+    
+    return result
+
+
 class ReplayBuffer:
     """
     Replay buffer for iphone zarr dataset
@@ -112,38 +169,18 @@ class Converter:
                 try:
                     start_idx = episode_start[episode_id]
                     end_idx = episode_ends[episode_id]
-                    episode_data = {}
                     all_keys = ['left_wrist_img', 'left_robot_tcp_pose', 'left_robot_gripper_width']
                     if self.robot_type == "bimanual_iphone_flexiv":
                         all_keys.extend(['right_wrist_img', 'right_robot_tcp_pose', 'right_robot_gripper_width'])
-                    episode_data = {
+                    raw_episode_data = {
                         k: replay_buffer.data[k][start_idx:end_idx] for k in all_keys
                     }
-                    # construct state 
-                    left_pose_9d = episode_data["left_robot_tcp_pose"]
-                    left_pose = np.zeros((left_pose_9d.shape[0], 6), dtype=np.float32)
-                    for i in range(left_pose.shape[0]):
-                        left_pose[i][:3] = left_pose_9d[i][:3]
-                        left_pose[i][3:] = matrix_to_rotvec(ortho6d_to_matrix(left_pose_9d[i][3:9]))
-                    left_gripper_width = episode_data["left_robot_gripper_width"]
-                    left_state = np.concatenate([left_pose, left_gripper_width], axis=1)
-                    if self.robot_type == "single_iphone_flexiv":
-                        state = left_state
-                    else:
-                        right_pose_9d = episode_data["right_robot_tcp_pose"]
-                        right_pose = np.zeros((right_pose_9d.shape[0], 6), dtype=np.float32)
-                        for i in range(right_pose.shape[0]):
-                            right_pose[i][:3] = right_pose_9d[i][:3]
-                            right_pose[i][3:] = matrix_to_rotvec(ortho6d_to_matrix(right_pose_9d[i][3:9]))
-                        right_gripper_width = episode_data["right_robot_gripper_width"]
-                        right_state = np.concatenate([right_pose, right_gripper_width], axis=1)
-                        state = np.concatenate([left_state, right_state], axis=1)
-                    episode_data["state"] = state
-                    # construct actions (use state as the action)
-                    episode_data["actions"] = state
-                    episode_data["task"] = task
+                    # Convert to LeRobot format using shared function
+                    episode_data = convert_episode_to_lerobot_format(
+                        raw_episode_data, self.robot_type, task
+                    )
                     # save all frames
-                    num_frames = state.shape[0]
+                    num_frames = episode_data["state"].shape[0]
                     for step in range(num_frames):
                         frame_dict = {feat: episode_data[feat][step] for feat in self.features}
                         frame_dict["task"] = task

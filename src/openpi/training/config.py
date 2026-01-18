@@ -780,6 +780,59 @@ class TrainConfig:
         if self.resume and self.overwrite:
             raise ValueError("Cannot resume and overwrite at the same time.")
 
+@dataclasses.dataclass(frozen=True)
+class OnlineDaggerTrainConfig:
+    """Configuration for Online DAgger training with adaptive sampling."""
+
+    # Base training config name
+    config_name: str = tyro.MISSING
+    # Experiment name
+    exp_name: str | None = None
+    # If true, will overwrite the checkpoint directory if it already exists
+    overwrite: bool = False
+    # If true, will resume training from the last checkpoint
+    resume: bool = False
+
+    # Path to a checkpoint to initialize model weights from (e.g., "./checkpoints/<config>/<exp>/<step>/params")
+    # If not provided, uses the weight_loader defined in the base config
+    init_checkpoint: str | None = None
+
+    # Data cloud endpoint for fetching new episodes
+    datacloud_endpoint: str = "http://127.0.0.1:8083"
+    # Identifier for the data cloud recordings
+    identifier: str = ""
+    # Query filter for data cloud API
+    query_filter: dict = dataclasses.field(default_factory=dict)
+    # Fetch new data every N training steps
+    fetch_interval: int = 1
+
+    # Online LeRobot dataset repo id
+    online_repo_id: str = ""
+    # Robot type for online dataset creation
+    robot_type: str = "single_iphone_flexiv"
+    # FPS for online dataset
+    fps: int = 10
+    # Task description for online data
+    task_description: str = ""
+    # Features configuration (if None, will be inferred from offline dataset)
+    features: dict | None = None
+    # zarr configs
+    use_absolute_action: bool = True
+    action_type: str = "left_arm_6DOF_gripper_width"
+    temporal_downsample_ratio: int = 0
+    use_dino: bool = False
+    episode_clip_head_seconds: float = 0.0
+    episode_clip_tail_seconds: float = 0.0
+    gripper_width_bias: float = 0.0
+    gripper_width_scale: float = 1.0
+
+    # Adaptive sampling parameters (SOP-style)
+    window_size: int = 200  # Sliding window for loss estimation
+    boost_factor: float = 1.5  # α > 1 to prioritize online data
+    min_online_ratio: float = 0.2  # Minimum online sampling weight
+    max_online_ratio: float = 0.8  # Maximum online sampling weight
+    initial_online_weight: float = 0.5  # Initial online weight
+
 # Use `get_config` if you need to get a config by name in your 
 _CONFIGS = [
     TrainConfig(
