@@ -3,9 +3,12 @@ Online data fetcher for fetching new episodes from cloud storage.
 
 Author: Wendi Chen
 """
+import os
+import sys
+sys.path.append(os.getcwd())
+
 import hashlib
 import logging
-import os
 import tarfile
 import tempfile
 from collections import deque

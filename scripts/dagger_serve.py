@@ -6,13 +6,11 @@ them to the backend inference service. The API is compatible with umi_base.
 
 Author: Wendi Chen
 """
-import base64
 import logging
 import sys
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-import numpy as np
 import requests
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -22,13 +20,16 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
 
 from openpi.training import config as _config
 
+sys.path.insert(0, str(Path(__file__).parent))
+from dagger_utils import TaskObsSpec, deserialize_observations
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="OpenPi DAgger Inference Server", version="1.0.0")
 
-# Backend URL - can be configured via environment variable
-BACKEND_URL = "http://localhost:8080"
+
+BACKEND_URL = None
 
 
 class InferenceRequest(BaseModel):
@@ -45,163 +46,6 @@ class InferenceResponse(BaseModel):
     success: bool
     data: Optional[Dict[str, Any]] = None
     error: Optional[str] = None
-
-
-class TaskObsSpec:
-    """
-    Validates observation format based on openpi config.
-    """
-
-    def __init__(self, workspace_config: str):
-        self.workspace_config = workspace_config
-        self.obs_spec = self._load_obs_spec()
-
-    def _load_obs_spec(self) -> Dict[str, Dict[str, Any]]:
-        """
-        Load observation specification from openpi config.
-        For openpi, we infer the expected format from the data config transforms.
-        """
-        try:
-            train_config = _config.get_config(self.workspace_config)
-            data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
-
-            # Infer observation spec from model config
-            # This is a simplified version - actual spec depends on robot type
-            obs_spec = {}
-
-            # Common patterns based on robot type in config name
-            if "iPhoneSingle" in self.workspace_config or "single_iphone" in self.workspace_config:
-                obs_spec = {
-                    "observation/state": {"shape": [7], "type": "low_dim"},
-                    "observation/left_wrist_image": {"shape": [224, 224, 3], "type": "rgb"},
-                }
-            elif "iPhoneBimanual" in self.workspace_config or "bimanual_iphone" in self.workspace_config:
-                obs_spec = {
-                    "observation/state": {"shape": [14], "type": "low_dim"},
-                    "observation/left_wrist_image": {"shape": [224, 224, 3], "type": "rgb"},
-                    "observation/right_wrist_image": {"shape": [224, 224, 3], "type": "rgb"},
-                }
-            elif "aloha" in self.workspace_config.lower():
-                obs_spec = {
-                    "images": {"shape": [3, 224, 224], "type": "rgb_dict"},  # Multiple cameras
-                    "state": {"shape": [14], "type": "low_dim"},
-                }
-            elif "droid" in self.workspace_config.lower():
-                obs_spec = {
-                    "observation/image": {"shape": [224, 224, 3], "type": "rgb"},
-                    "observation/wrist_image": {"shape": [224, 224, 3], "type": "rgb"},
-                    "observation/joint_position": {"shape": [7], "type": "low_dim"},
-                    "observation/gripper_position": {"shape": [1], "type": "low_dim"},
-                }
-            elif "libero" in self.workspace_config.lower():
-                obs_spec = {
-                    "image": {"shape": [224, 224, 3], "type": "rgb"},
-                    "wrist_image": {"shape": [224, 224, 3], "type": "rgb"},
-                    "state": {"shape": [7], "type": "low_dim"},
-                }
-            else:
-                # Default spec
-                obs_spec = {
-                    "state": {"shape": [7], "type": "low_dim"},
-                    "image": {"shape": [224, 224, 3], "type": "rgb"},
-                }
-
-            # Add prompt field
-            obs_spec["prompt"] = {"type": "text"}
-
-            return obs_spec
-
-        except Exception as e:
-            logger.warning(f"Failed to load obs spec from config {self.workspace_config}: {e}")
-            # Return a minimal default spec
-            return {
-                "state": {"shape": [7], "type": "low_dim"},
-                "image": {"shape": [224, 224, 3], "type": "rgb"},
-            }
-
-    def validate_observations(self, observations: Dict[str, Any]) -> tuple[bool, str]:
-        """
-        Validate observations against the expected spec.
-        Returns (is_valid, error_message).
-        """
-        # For now, we do basic validation
-        # More detailed validation can be added based on specific requirements
-
-        if not observations:
-            return False, "Observations cannot be empty"
-
-        for key, spec in self.obs_spec.items():
-            if key == "prompt":
-                # Prompt is optional
-                continue
-
-            if key not in observations:
-                # Check alternative key formats
-                alt_keys = [
-                    key.replace("/", "."),
-                    key.replace("observation/", ""),
-                    key.split("/")[-1],
-                ]
-                found = False
-                for alt_key in alt_keys:
-                    if alt_key in observations:
-                        found = True
-                        break
-                if not found:
-                    # Not a critical error, just log
-                    logger.debug(f"Observation key {key} not found, but may be optional")
-
-        return True, "Valid"
-
-
-def decode_observations(observations: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Decode base64-encoded images and convert observations to numpy arrays.
-    """
-    decoded = {}
-
-    for key, value in observations.items():
-        if isinstance(value, str):
-            # Might be a base64-encoded image
-            try:
-                decoded_bytes = base64.b64decode(value)
-                # Try to decode as image
-                img_array = np.frombuffer(decoded_bytes, dtype=np.uint8)
-                # Reshape if possible (assume 224x224x3 for standard images)
-                if len(img_array) == 224 * 224 * 3:
-                    img_array = img_array.reshape(224, 224, 3)
-                decoded[key] = img_array
-            except Exception:
-                # Not base64, keep as string
-                decoded[key] = value
-        elif isinstance(value, list):
-            # Convert lists to numpy arrays
-            if isinstance(value[0], str):
-                # List of base64-encoded images (multi-frame)
-                frames = []
-                for frame_b64 in value:
-                    try:
-                        decoded_bytes = base64.b64decode(frame_b64)
-                        img_array = np.frombuffer(decoded_bytes, dtype=np.uint8)
-                        if len(img_array) == 224 * 224 * 3:
-                            img_array = img_array.reshape(224, 224, 3)
-                        frames.append(img_array)
-                    except Exception:
-                        frames.append(frame_b64)
-                decoded[key] = np.stack(frames) if all(isinstance(f, np.ndarray) for f in frames) else value
-            elif isinstance(value[0], list):
-                # Nested list (multi-frame low-dim data)
-                decoded[key] = np.array(value)
-            else:
-                # Simple list (single-frame low-dim data)
-                decoded[key] = np.array(value)
-        elif isinstance(value, dict):
-            # Nested dict (e.g., images dict)
-            decoded[key] = decode_observations(value)
-        else:
-            decoded[key] = value
-
-    return decoded
 
 
 @app.get("/health")
@@ -225,25 +69,30 @@ async def inference_endpoint(request: InferenceRequest):
             logger.error(f"Checkpoint not found: {request.checkpoint_path}")
             raise HTTPException(status_code=400, detail=f"Checkpoint not found: {request.checkpoint_path}")
 
-        # Validate observation format
+        # Deserialize observations (convert base64 images and lists to numpy arrays)
+        deserialized_observations = deserialize_observations(request.observations)
+        
+        # Create task spec for processing and validation
         task_spec = TaskObsSpec(request.workspace_config)
-        is_valid, error_msg = task_spec.validate_observations(request.observations)
+        
+        # Process, reshape and validate observations in one step
+        converted_observations, is_valid, error_msg = task_spec.process_observations(
+            deserialized_observations, 
+            task=request.task_config
+        )
 
         if not is_valid:
             logger.error(f"Invalid observation format: {error_msg}")
             raise HTTPException(status_code=400, detail=f"Invalid observation format: {error_msg}")
 
-        # Decode observations
-        decoded_observations = decode_observations(request.observations)
-
-        # Forward request to backend API
+        # Forward request to backend API with raw observations (backend will handle conversion again)
         backend_payload = {
             "request_id": request.request_id,
             "device_id": request.device_id,
             "workspace_config": request.workspace_config,
             "task_config": request.task_config,
             "checkpoint_path": request.checkpoint_path,
-            "observations": decoded_observations,
+            "observations": request.observations,
             "debug": request.debug,
         }
 
@@ -256,11 +105,7 @@ async def inference_endpoint(request: InferenceRequest):
             )
 
             if response.status_code == 200:
-                result = response.json()
-                if result.get("success", False):
-                    return InferenceResponse(success=True, data=result.get("data"))
-                else:
-                    return InferenceResponse(success=False, error=result.get("error", "Unknown error"))
+                return InferenceResponse(success=True, data=response.json())
             else:
                 return InferenceResponse(
                     success=False, error=f"Backend service error: {response.status_code} - {response.text}"

@@ -22,6 +22,9 @@ numcodecs==0.11.0
 lz4
 pymongo
 transforms3d
+uvicorn
+fastapi
+python-multipart
 ```
 1. 数据转换：
 ```shell

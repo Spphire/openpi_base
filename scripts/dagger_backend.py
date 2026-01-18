@@ -31,9 +31,37 @@ from openpi.policies import policy as _policy
 from openpi.policies import policy_config as _policy_config
 from openpi.training import config as _config
 
+sys.path.insert(0, str(Path(__file__).parent))
+from dagger_utils import TaskObsSpec, deserialize_observations
+import scipy.spatial.transform as st
+from openpi.training.dsl_pose_utils import mat_to_rot6d
+
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+def convert_action_rotation_to_6d(action: np.ndarray) -> np.ndarray:
+    """
+    Convert action rotation from euler angles (xyz order) to 6D representation.
+    
+    Input shape: [..., 7] where 7 = 3 (pos) + 3 (euler_xyz) + 1 (gripper)
+    Output shape: [..., 10] where 10 = 3 (pos) + 6 (rot_6d) + 1 (gripper)
+    """
+    pos = action[..., :3]
+    euler_xyz = action[..., 3:6]
+    gripper = action[..., 6:7]
+    
+    # Convert euler angles (xyz order) to rotation matrix
+    original_shape = euler_xyz.shape[:-1]
+    euler_xyz_flat = euler_xyz.reshape(-1, 3)
+    
+    rot_matrices = st.Rotation.from_euler('xyz', euler_xyz_flat, degrees=False).as_matrix()
+    rot_6d = mat_to_rot6d(rot_matrices)
+    
+    rot_6d = rot_6d.reshape(original_shape + (6,))
+    
+    # Concatenate: pos (3) + rot_6d (6) + gripper (1) = 10
+    result = np.concatenate([pos, rot_6d, gripper], axis=-1)
+    return result
 
 class InferenceRequest(BaseModel):
     request_id: str
@@ -43,6 +71,7 @@ class InferenceRequest(BaseModel):
     checkpoint_path: str
     observations: Dict[str, Any]
     debug: bool = False
+    rotation_rep: str = "6d"  # "6d" or "rpy", default to 6d representation
 
 
 class InferenceResponse(BaseModel):
@@ -102,9 +131,13 @@ class InferenceSession:
             if not checkpoint_dir.exists():
                 raise FileNotFoundError(f"Checkpoint not found: {self.checkpoint_path}")
 
+            # Get data config to extract repack_transforms for inference
+            data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
+
             self.policy = _policy_config.create_trained_policy(
                 train_config,
                 checkpoint_dir,
+                repack_transforms=data_config.repack_transforms,
                 default_prompt=self.task_config if self.task_config else None,
             )
 
@@ -134,7 +167,7 @@ class InferenceSession:
                 result = self.policy.infer(observations)
 
                 return {
-                    "action": result.get("actions", result.get("action", [])),
+                    "action": result["actions"][np.newaxis, ...].tolist(),
                     "session_id": self.session_id,
                     "request_id": request_id,
                 }
@@ -196,9 +229,13 @@ class InferenceSession:
                 # Full re-initialization is required because the model params are loaded differently
                 train_config = _config.get_config(self.workspace_config)
 
+                # Get data config to extract repack_transforms for inference
+                data_config = train_config.data.create(train_config.assets_dirs, train_config.model)
+
                 self.policy = _policy_config.create_trained_policy(
                     train_config,
                     new_checkpoint_path,
+                    repack_transforms=data_config.repack_transforms,
                     default_prompt=self.task_config if self.task_config else None,
                 )
 
@@ -491,6 +528,26 @@ async def backend_inference(request: InferenceRequest):
     try:
         logger.info(f"Received inference request for device {request.device_id}, request_id: {request.request_id}")
 
+        # Deserialize observations (convert serialized data back to numpy arrays)
+        deserialized_observations = deserialize_observations(request.observations)
+        
+        # Create task spec for observation processing
+        task_spec = TaskObsSpec(request.workspace_config)
+        
+        # Process, reshape and validate observations (handles 9D pose -> 6D pose conversion)
+        converted_observations, is_valid, error_msg = task_spec.process_observations(
+            deserialized_observations, 
+            task=request.task_config
+        )
+        
+        if not is_valid:
+            logger.warning(f"Observation validation warning: {error_msg}")
+        
+        # Add dummy actions field to satisfy transforms requirement
+        # Shape: [action_horizon, action_dim]
+        if task_spec.action_dim is not None and task_spec.action_horizon is not None:
+            converted_observations["actions"] = np.zeros((task_spec.action_horizon, task_spec.action_dim), dtype=np.float32)
+
         # Get or create session
         session = session_manager.get_or_create_session(
             request.workspace_config,
@@ -501,13 +558,22 @@ async def backend_inference(request: InferenceRequest):
         # Acquire reference to prevent cleanup during inference
         session.acquire()
 
-        # Perform inference
-        result = session.predict_action(request.observations, request.request_id)
+        # Perform inference with converted observations
+        result = session.predict_action(converted_observations, request.request_id)
+
+        # Convert rotation representation if needed
+        if request.rotation_rep == "6d":
+            action = np.array(result["action"])
+            action_6d = convert_action_rotation_to_6d(action)
+            result["action"] = action_6d.tolist()
+        # If rotation_rep is "rpy", keep the original 3D axis-angle representation
 
         return InferenceResponse(success=True, data=result)
 
     except Exception as e:
         logger.error(f"Backend inference failed: {e}")
+        import traceback
+        logger.error(traceback.format_exc())
         return InferenceResponse(success=False, error=str(e))
     finally:
         if session is not None:
