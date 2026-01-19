@@ -21,6 +21,7 @@ class EnvMode(enum.Enum):
     ALOHA_SIM = "aloha_sim"
     DROID = "droid"
     LIBERO = "libero"
+    IPHONE_FLEXIV = "iphone_flexiv"
 
 
 @dataclasses.dataclass
@@ -120,6 +121,7 @@ def main(args: Args) -> None:
         EnvMode.ALOHA_SIM: _random_observation_aloha,
         EnvMode.DROID: _random_observation_droid,
         EnvMode.LIBERO: _random_observation_libero,
+        EnvMode.IPHONE_FLEXIV: _random_observation_iphone_flexiv,
     }[args.env]
 
     policy = _websocket_client_policy.WebsocketClientPolicy(
@@ -178,6 +180,14 @@ def _random_observation_libero() -> dict:
         "observation/state": np.random.rand(8),
         "observation/image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "observation/wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
+        "prompt": "do something",
+    }
+
+
+def _random_observation_iphone_flexiv() -> dict:
+    return {
+        "observation/state": np.random.rand(7),
+        "observation/left_wrist_image": np.random.randint(256, size=(224, 224, 3), dtype=np.uint8),
         "prompt": "do something",
     }
 
