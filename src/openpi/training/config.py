@@ -1033,6 +1033,48 @@ _CONFIGS = [
         num_train_steps=30_000,
     ),
     TrainConfig(
+        name="pi05_iPhoneSingle_pour_msg", # change config name here
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False), # change chunk size here
+        data=LeRobotSingleiPhoneFlexivDataConfig(
+            repo_id="flexiv/pour_msg", # change dataset name here
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_iPhoneBimanual_shop_bagging", # change config name here
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False), # change chunk size here
+        data=LeRobotBimanualiPhoneFlexivDataConfig(
+            repo_id="flexiv/shop_bagging", # change dataset name here
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
         name="pi05_iPhoneBimanual_foldtowel", # change config name here
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False), # change chunk size here
         data=LeRobotBimanualiPhoneFlexivDataConfig(
