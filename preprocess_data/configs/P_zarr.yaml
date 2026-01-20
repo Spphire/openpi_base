@@ -1,0 +1,17 @@
+data:
+  - "/mnt/data/wendi/umi_base/.cache/cloud_pick_and_place_image_dataset/0737e6cea25056e5/replay_buffer.zarr"
+task:
+  - "pick up the brush and sweep the coffee beans as the shape of the letter P" 
+features:
+  left_wrist_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  state:
+    dtype: "float32"
+    shape: [7,] 
+    names: ["state"]
+  actions:
+    dtype: "float32"
+    shape: [7,]
+    names: ["actions"]
