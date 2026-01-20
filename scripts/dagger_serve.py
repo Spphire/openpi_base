@@ -23,7 +23,7 @@ from openpi.training import config as _config
 sys.path.insert(0, str(Path(__file__).parent))
 from dagger_utils import TaskObsSpec, deserialize_observations
 
-logging.basicConfig(level=logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="OpenPi DAgger Inference Server", version="1.0.0")

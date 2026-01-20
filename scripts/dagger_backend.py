@@ -36,7 +36,7 @@ from dagger_utils import TaskObsSpec, deserialize_observations
 import scipy.spatial.transform as st
 from openpi.training.dsl_pose_utils import mat_to_rot6d
 
-logging.basicConfig(level=logging.INFO)
+logging.getLogger().setLevel(logging.INFO)
 logger = logging.getLogger(__name__)
 
 def convert_action_rotation_to_6d(action: np.ndarray) -> np.ndarray:
