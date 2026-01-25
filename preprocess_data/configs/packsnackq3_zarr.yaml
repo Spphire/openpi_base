@@ -1,0 +1,29 @@
+data:
+  - "data/packsnackq3/replay_buffer.zarr"
+task:
+  - "packsnack bimanual iphone and head quest3 zarr"
+features:
+  left_wrist_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  right_wrist_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  left_eye_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  right_eye_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  state:
+    dtype: "float32"
+    shape: [14,] 
+    names: ["state"]
+  actions:
+    dtype: "float32"
+    shape: [14,]
+    names: ["actions"]
