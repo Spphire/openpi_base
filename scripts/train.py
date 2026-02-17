@@ -215,7 +215,7 @@ def image_grad_metrics(
     def loss_wrt_obs(obs: _model.Observation) -> at.Array:
         return loss_fn(model, train_rng, obs, actions)
 
-    obs_grads = jax.grad(loss_wrt_obs)(observation)
+    obs_grads = jax.grad(loss_wrt_obs, allow_int=True)(observation)
     metrics: dict[str, at.Array] = {
         f"image_grad_norm/{key}": optax.global_norm(obs_grads.images[key]) for key in obs_grads.images
     }
