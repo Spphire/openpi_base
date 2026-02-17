@@ -330,17 +330,26 @@ def main(config: _config.TrainConfig):
         donate_argnums=(1,),
     )
 
-    pimage_metrics = jax.jit(
-        functools.partial(image_grad_metrics, config),
-        in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
-        out_shardings=replicated_sharding,
-    )
+    enable_image_metrics = True
+    image_metrics_every = 1000
+    enable_action_metrics = True
+    action_metrics_every = 1000
 
-    paction_metrics = jax.jit(
-        functools.partial(action_mse_metrics, config),
-        in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
-        out_shardings=replicated_sharding,
-    )
+    pimage_metrics = None
+    if enable_image_metrics:
+        pimage_metrics = jax.jit(
+            functools.partial(image_grad_metrics, config),
+            in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+            out_shardings=replicated_sharding,
+        )
+
+    paction_metrics = None
+    if enable_action_metrics:
+        paction_metrics = jax.jit(
+            functools.partial(action_mse_metrics, config),
+            in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+            out_shardings=replicated_sharding,
+        )
 
     start_step = int(train_state.step)
     pbar = tqdm.tqdm(
@@ -360,11 +369,14 @@ def main(config: _config.TrainConfig):
         if step % config.log_interval == 0:
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
-            image_metrics = jax.device_get(pimage_metrics(train_rng, train_state, batch))
-            image_metrics = jax.tree.map(lambda x: float(x), image_metrics)
-            action_metrics = jax.device_get(paction_metrics(train_rng, train_state, batch))
-            action_metrics = jax.tree.map(lambda x: float(x), action_metrics)
-            reduced_info = {**reduced_info, **image_metrics, **action_metrics}
+            if enable_image_metrics and pimage_metrics is not None and (step % image_metrics_every == 0):
+                image_metrics = jax.device_get(pimage_metrics(train_rng, train_state, batch))
+                image_metrics = jax.tree.map(lambda x: float(x), image_metrics)
+                reduced_info = {**reduced_info, **image_metrics}
+            if enable_action_metrics and paction_metrics is not None and (step % action_metrics_every == 0):
+                action_metrics = jax.device_get(paction_metrics(train_rng, train_state, batch))
+                action_metrics = jax.tree.map(lambda x: float(x), action_metrics)
+                reduced_info = {**reduced_info, **action_metrics}
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
