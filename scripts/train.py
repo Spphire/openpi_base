@@ -192,6 +192,55 @@ def train_step(
     return new_state, info
 
 
+@at.typecheck
+def image_grad_metrics(
+    config: _config.TrainConfig,
+    rng: at.KeyArrayLike,
+    state: training_utils.TrainState,
+    batch: tuple[_model.Observation, _model.Actions],
+) -> dict[str, at.Array]:
+    model = nnx.merge(state.model_def, state.params)
+    model.train()
+
+    @at.typecheck
+    def loss_fn(
+        model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
+    ):
+        chunked_loss = model.compute_loss(rng, observation, actions, train=True)
+        return jnp.mean(chunked_loss)
+
+    train_rng = jax.random.fold_in(rng, state.step)
+    observation, actions = batch
+
+    def loss_wrt_obs(obs: _model.Observation) -> at.Array:
+        return loss_fn(model, train_rng, obs, actions)
+
+    obs_grads = jax.grad(loss_wrt_obs)(observation)
+    metrics: dict[str, at.Array] = {
+        f"image_grad_norm/{key}": optax.global_norm(obs_grads.images[key]) for key in obs_grads.images
+    }
+
+    def mask_obs_for_view(obs: _model.Observation, view_key: str) -> _model.Observation:
+        images = {}
+        image_masks = {}
+        for key in obs.images:
+            if key == view_key:
+                images[key] = obs.images[key]
+                image_masks[key] = obs.image_masks[key]
+            else:
+                images[key] = jnp.zeros_like(obs.images[key])
+                image_masks[key] = jnp.zeros_like(obs.image_masks[key])
+        return dataclasses.replace(obs, images=images, image_masks=image_masks)
+
+    diff_state = nnx.DiffState(0, config.trainable_filter)
+    for key in observation.images:
+        view_obs = mask_obs_for_view(observation, key)
+        _, view_grads = nnx.value_and_grad(loss_fn, argnums=diff_state)(model, train_rng, view_obs, actions)
+        metrics[f"image_param_grad_norm/{key}"] = optax.global_norm(view_grads)
+
+    return metrics
+
+
 def main(config: _config.TrainConfig):
     init_logging()
     logging.info(f"Running on: {platform.node()}")
@@ -248,6 +297,12 @@ def main(config: _config.TrainConfig):
         donate_argnums=(1,),
     )
 
+    pimage_metrics = jax.jit(
+        functools.partial(image_grad_metrics, config),
+        in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+        out_shardings=replicated_sharding,
+    )
+
     start_step = int(train_state.step)
     pbar = tqdm.tqdm(
         range(start_step, config.num_train_steps),
@@ -266,6 +321,9 @@ def main(config: _config.TrainConfig):
         if step % config.log_interval == 0:
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
+            image_metrics = jax.device_get(pimage_metrics(train_rng, train_state, batch))
+            image_metrics = jax.tree.map(lambda x: float(x), image_metrics)
+            reduced_info = {**reduced_info, **image_metrics}
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
