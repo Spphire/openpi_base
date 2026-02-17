@@ -251,9 +251,13 @@ def image_grad_metrics(
         return loss_fn(model, train_rng, obs, actions)
 
     obs_grads = jax.grad(loss_wrt_obs, allow_int=True)(observation)
-    return {
-        f"image_grad_norm/{key}": optax.global_norm(obs_grads.images[key]) for key in obs_grads.images
-    }
+    metrics: dict[str, at.Array] = {}
+    for key, grad in obs_grads.images.items():
+        finite = jnp.isfinite(grad)
+        safe_grad = jnp.where(finite, grad, 0.0)
+        metrics[f"image_grad_norm/{key}"] = optax.global_norm(safe_grad)
+        metrics[f"image_grad_nonfinite_ratio/{key}"] = 1.0 - jnp.mean(finite.astype(jnp.float32))
+    return metrics
 
 
 def main(config: _config.TrainConfig):
