@@ -241,6 +241,39 @@ def image_grad_metrics(
     return metrics
 
 
+@at.typecheck
+def action_mse_metrics(
+    config: _config.TrainConfig,
+    rng: at.KeyArrayLike,
+    state: training_utils.TrainState,
+    batch: tuple[_model.Observation, _model.Actions],
+) -> dict[str, at.Array]:
+    model = nnx.merge(state.model_def, state.params)
+    model.eval()
+
+    observation, actions = batch
+    pred_rng = jax.random.fold_in(rng, state.step)
+    pred_actions = model.sample_actions(pred_rng, observation)
+    mse = jnp.mean(jnp.square(pred_actions - actions))
+    metrics: dict[str, at.Array] = {"train_action_mse_error": mse}
+
+    if "base_0_rgb" in observation.images:
+        masked_images = dict(observation.images)
+        masked_image_masks = dict(observation.image_masks)
+        masked_images["base_0_rgb"] = jnp.zeros_like(observation.images["base_0_rgb"])
+        masked_image_masks["base_0_rgb"] = jnp.zeros_like(observation.image_masks["base_0_rgb"])
+        masked_observation = dataclasses.replace(
+            observation, images=masked_images, image_masks=masked_image_masks
+        )
+        masked_pred_actions = model.sample_actions(pred_rng, masked_observation)
+        mse_no_head = jnp.mean(jnp.square(masked_pred_actions - actions))
+        metrics["train_action_mse_error_no_head"] = mse_no_head
+        metrics["train_action_mse_head_importance"] = mse_no_head - mse
+
+    model.train()
+    return metrics
+
+
 def main(config: _config.TrainConfig):
     init_logging()
     logging.info(f"Running on: {platform.node()}")
@@ -303,6 +336,12 @@ def main(config: _config.TrainConfig):
         out_shardings=replicated_sharding,
     )
 
+    paction_metrics = jax.jit(
+        functools.partial(action_mse_metrics, config),
+        in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+        out_shardings=replicated_sharding,
+    )
+
     start_step = int(train_state.step)
     pbar = tqdm.tqdm(
         range(start_step, config.num_train_steps),
@@ -323,7 +362,9 @@ def main(config: _config.TrainConfig):
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
             image_metrics = jax.device_get(pimage_metrics(train_rng, train_state, batch))
             image_metrics = jax.tree.map(lambda x: float(x), image_metrics)
-            reduced_info = {**reduced_info, **image_metrics}
+            action_metrics = jax.device_get(paction_metrics(train_rng, train_state, batch))
+            action_metrics = jax.tree.map(lambda x: float(x), action_metrics)
+            reduced_info = {**reduced_info, **image_metrics, **action_metrics}
             info_str = ", ".join(f"{k}={v:.4f}" for k, v in reduced_info.items())
             pbar.write(f"Step {step}: {info_str}")
             wandb.log(reduced_info, step=step)
