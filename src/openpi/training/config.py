@@ -433,7 +433,8 @@ class LeRobotBimanualiPhoneVRFlexivDataConfig(DataConfigFactory):
                 _transforms.RepackTransform(
                     {
                         "observation/state": "state",
-                        "observation/eye_image": "eye_img",
+                        "observation/left_eye_image": "left_eye_img",
+                        "observation/right_eye_image": "right_eye_img",
                         "observation/left_wrist_image": "left_wrist_img",
                         "observation/right_wrist_image": "right_wrist_img",
                         "actions": "actions",
@@ -508,7 +509,8 @@ class LeRobotSingleiPhoneFlexivVRDataConfig(DataConfigFactory):
                     {
                         "observation/state": "state",
                         "observation/left_wrist_image": "left_wrist_img",
-                        "observation/eye_image": "eye_img",
+                        "observation/left_eye_image": "left_eye_img",
+                        "observation/right_eye_image": "right_eye_img",
                         "actions": "actions",
                         "prompt": "task",
                     }
@@ -1172,10 +1174,10 @@ _CONFIGS = [
         num_train_steps=30_000,
     ),
     TrainConfig(
-        name="pi05_iPhoneVRSingle_mouse", # change config name here
+        name="pi05_iPhoneVRSingle_q3_mouse", # change config name here
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False), # change chunk size here
         data=LeRobotSingleiPhoneFlexivVRDataConfig(
-            repo_id="flexiv/mouse", # change dataset name here
+            repo_id="q3_mouse", # change dataset name here
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
@@ -1196,7 +1198,7 @@ _CONFIGS = [
         name="pi05_iPhoneVRBimanual_packsnackq3", # change config name here
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False), # change chunk size here
         data=LeRobotBimanualiPhoneVRFlexivDataConfig(
-            repo_id="flexiv/packsnackq3", # change dataset name here
+            repo_id="packsnackq3", # change dataset name here
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
@@ -1211,7 +1213,28 @@ _CONFIGS = [
         ema_decay=0.999,
         weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
         pytorch_weight_path="/path/to/your/pytorch_weight_path",
-        num_train_steps=30_000,
+        num_train_steps=60_000,
+    ),
+    TrainConfig(
+        name="pi05_iPhoneVRBimanual_q3_shop_bagging_0202", # change config name here
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False), # change chunk size here
+        data=LeRobotBimanualiPhoneVRFlexivDataConfig(
+            repo_id="q3_shop_bagging_0202_100", # change dataset name here
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=60_000,
     ),
     TrainConfig(
         name="pi05_iPhoneBimanual_shop_bagging", # change config name here

@@ -15,6 +15,7 @@ from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
 import numpy as np
 from scipy.spatial.transform import Rotation
 from tqdm import tqdm
+import cv2
 
 def normalize_vector(v: np.ndarray) -> np.ndarray:
     v_mag = np.linalg.norm(v)
@@ -39,6 +40,81 @@ def ortho6d_to_matrix(ortho6d: np.ndarray) -> np.ndarray:
 def matrix_to_rotvec(rot):
     return Rotation.from_matrix(rot).as_rotvec()
 
+def resize(
+    images,
+    target_h=224,
+    target_w=224,
+    mode="pad",          # "pad" or "crop"
+    pad_value=0,
+    interpolation=cv2.INTER_LINEAR,
+):
+    """
+    Resize images with aspect ratio preserved, then pad or crop.
+
+    Args:
+        images (np.ndarray): (b, h, w, 3)
+        target_h (int)
+        target_w (int)
+        mode (str): "pad" or "crop"
+        pad_value (int or tuple): padding value
+        interpolation: cv2 interpolation
+
+    Returns:
+        np.ndarray: (b, target_h, target_w, 3)
+    """
+    assert mode in ["pad", "crop"]
+    b, h, w, c = images.shape
+    assert c == 3
+
+    if h==target_h and w==target_w:
+        return images
+
+    resized_images = []
+
+    for img in images:
+        scale_h = target_h / h
+        scale_w = target_w / w
+
+        if mode == "pad":
+            scale = min(scale_h, scale_w)
+        else:  # crop
+            scale = max(scale_h, scale_w)
+
+        new_h = int(round(h * scale))
+        new_w = int(round(w * scale))
+
+        img_resized = cv2.resize(
+            img, (new_w, new_h), interpolation=interpolation
+        )
+
+        if mode == "pad":
+            pad_h = target_h - new_h
+            pad_w = target_w - new_w
+
+            top = pad_h // 2
+            bottom = pad_h - top
+            left = pad_w // 2
+            right = pad_w - left
+
+            img_out = cv2.copyMakeBorder(
+                img_resized,
+                top, bottom, left, right,
+                borderType=cv2.BORDER_CONSTANT,
+                value=pad_value,
+            )
+
+        else:  # crop
+            start_y = (new_h - target_h) // 2
+            start_x = (new_w - target_w) // 2
+
+            img_out = img_resized[
+                start_y:start_y + target_h,
+                start_x:start_x + target_w
+            ]
+
+        resized_images.append(img_out)
+
+    return np.stack(resized_images, axis=0)
 
 def convert_episode_to_lerobot_format(
     episode_data: dict,
@@ -84,16 +160,16 @@ def convert_episode_to_lerobot_format(
     
     result["state"] = state.astype(np.float32)
     result["actions"] = state.astype(np.float32).copy()
-    
+
     # Copy image data
     if "left_wrist_img" in episode_data:
-        result["left_wrist_img"] = episode_data["left_wrist_img"]
+        result["left_wrist_img"] = resize(episode_data["left_wrist_img"], mode="crop")
     if "right_wrist_img" in episode_data:
-        result["right_wrist_img"] = episode_data["right_wrist_img"]
+        result["right_wrist_img"] = resize(episode_data["right_wrist_img"], mode="crop")
     if "left_eye_img" in episode_data:
-        result["left_eye_img"] = episode_data["left_eye_img"]
+        result["left_eye_img"] = resize(episode_data["left_eye_img"], mode="pad")
     if "right_eye_img" in episode_data:
-        result["right_eye_img"] = episode_data["right_eye_img"]
+        result["right_eye_img"] = resize(episode_data["right_eye_img"], mode="pad")
     
     result["task"] = task
     
@@ -219,14 +295,15 @@ if __name__ == "__main__":
         "config_path",
         type=Path,
         nargs="?",
-        default=Path("preprocess_data/configs/packsnackq3_zarr.yaml"),
+        # default=Path("preprocess_data/configs/q3_shop_bagging_0202_100_zarr.yaml"),
+        default=Path("preprocess_data/configs/q3_mouse_zarr.yaml"),
         help="Path to the config YAML file (default: config0925.yaml)",
     )
     parser.add_argument(
         "repo_name",
         type=Path,
         nargs="?",
-        default=Path("flexiv/packsnackq3"),
+        default=Path("q3_mouse"),
         help="the name of the dataset",
     )
     parser.add_argument(
@@ -239,7 +316,7 @@ if __name__ == "__main__":
         "--robot_type",
         type=str,
         help="the type of robot",
-        default="bimanual_iphone_vr_flexiv",
+        default="single_iphone_vr_flexiv",
     )
     parser.add_argument(
         "--push_to_hub",

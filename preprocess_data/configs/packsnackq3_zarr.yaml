@@ -1,5 +1,5 @@
 data:
-  - "data/packsnackq3/replay_buffer.zarr"
+  - "/mnt/data/shenyibo/workspace/umi_base/.cache/packsnackq3_1-24/replay_buffer.zarr"
 task:
   - "packsnack bimanual iphone and head quest3 zarr"
 features:

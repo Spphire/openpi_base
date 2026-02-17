@@ -44,13 +44,17 @@ class BimanualiPhoneVRFlexivInputs(transforms.DataTransformFn):
     def __call__(self, data: dict) -> dict:
         left_wrist_image = _parse_image(data["observation/left_wrist_image"])
         right_wrist_image = _parse_image(data["observation/right_wrist_image"])
-        # random pick left or right eye image
-        if "observation/right_eye_image" in data:
-            eye_image = _parse_image(
-                data["observation/left_eye_image"] if np.random.rand() > 0.5 else data["observation/right_eye_image"]
-            )
+
+        if "observation/eye_image" in data.keys():
+            eye_image = _parse_image(data["observation/eye_image"])
         else:
-            eye_image = _parse_image(data["observation/left_eye_image"])
+            # random pick left or right eye image
+            if "observation/right_eye_image" in data:
+                eye_image = _parse_image(
+                    data["observation/left_eye_image"] if np.random.rand() > 0.5 else data["observation/right_eye_image"]
+                )
+            else:
+                eye_image = _parse_image(data["observation/left_eye_image"])
 
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {

@@ -42,13 +42,22 @@ class SingleiPhoneVRFlexivInputs(transforms.DataTransformFn):
 
     def __call__(self, data: dict) -> dict:
         left_wrist_image = _parse_image(data["observation/left_wrist_image"])
-        vr_head_image = _parse_image(data["observation/vr_head_image"])
 
+        if "observation/eye_image" in data.keys():
+            eye_image = _parse_image(data["observation/eye_image"])
+        else:
+            # random pick left or right eye image
+            if "observation/right_eye_image" in data:
+                eye_image = _parse_image(
+                    data["observation/left_eye_image"] if np.random.rand() > 0.5 else data["observation/right_eye_image"]
+                )
+            else:
+                eye_image = _parse_image(data["observation/left_eye_image"])
         # Create inputs dict. Do not change the keys in the dict below.
         inputs = {
             "state": data["observation/state"],
             "image": {
-                "base_0_rgb": vr_head_image,
+                "base_0_rgb": eye_image,
                 "left_wrist_0_rgb": left_wrist_image,
                 "right_wrist_0_rgb": np.zeros_like(left_wrist_image),
             },

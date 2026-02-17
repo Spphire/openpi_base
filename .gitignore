@@ -3,7 +3,9 @@ assets/
 checkpoints/
 data/
 wandb/
-
+tmp*/
+pymp*/
+dataset_cache
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

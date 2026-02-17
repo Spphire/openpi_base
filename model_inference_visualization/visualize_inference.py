@@ -133,54 +133,56 @@ class FlexivTrajectoryVisualizer:
             prev_state = None
             
             for i, sample_idx in enumerate(sample_indices):
-                try:
-                    # Get raw data from LeRobot dataset
-                    raw_data = dataset[sample_idx]
+                #try:
+                # Get raw data from LeRobot dataset
+                raw_data = dataset[sample_idx]
+                
+                # Apply repack transform to match expected format
+                # Based on LeRobotAsyncBiFlexivDataConfig repack_transform (no prev_state)
+                repacked_data = {
+                    "observation/left_wrist_image": raw_data["left_wrist_img"],
+                    "observation/right_wrist_image": raw_data["right_wrist_img"], 
+                    "observation/eye_image": raw_data["left_eye_img"],
+                    "observation/state": raw_data["state"],
+                    "actions": raw_data["actions"],
+                    "prompt": raw_data.get("task", "pick up object")
+                }
+
+                # Apply transform (this handles the format conversion)
+                transformed_data = flexiv_inputs(repacked_data)
+                
+                # Use previous sample's state if available, otherwise use zero state
+                current_state = transformed_data["state"]
+                if prev_state is None:
+                    # For first sample, use zero state (same as current state for delta transforms)
+                    sample_prev_state = np.zeros_like(current_state)
+                else:
+                    sample_prev_state = prev_state
+                
+                # Extract the data for our sample format
+                sample = {
+                    'sample_id': sample_idx,
+                    'sample_index_in_batch': i,
+                    'episode_source_id': episode_id,
+                    'state': current_state,
+                    'prev_state': sample_prev_state,
+                    "eye_image": transformed_data["image"]["base_0_rgb"],
+                    'left_wrist_image': transformed_data["image"]["left_wrist_0_rgb"],
+                    'right_wrist_image': transformed_data["image"]["right_wrist_0_rgb"],
+                    'gt_actions': transformed_data["actions"],
+                    'prompt': transformed_data.get("prompt", "pick up object"),
+                    'raw_data': raw_data
+                }
+                
+                # Update prev_state for next iteration
+                prev_state = current_state
+                
+                samples.append(sample)
+                print(f"Loaded sample {i+1}/{len(sample_indices)} (dataset index: {sample_idx})")
                     
-                    # Apply repack transform to match expected format
-                    # Based on LeRobotAsyncBiFlexivDataConfig repack_transform (no prev_state)
-                    repacked_data = {
-                        "observation/left_wrist_image": raw_data["left_wrist_image"],
-                        "observation/right_wrist_image": raw_data["right_wrist_image"], 
-                        "observation/state": raw_data["state"],
-                        "actions": raw_data["actions"],
-                        "prompt": raw_data.get("task", "pick up object")
-                    }
-                    
-                    # Apply transform (this handles the format conversion)
-                    transformed_data = flexiv_inputs(repacked_data)
-                    
-                    # Use previous sample's state if available, otherwise use zero state
-                    current_state = transformed_data["state"]
-                    if prev_state is None:
-                        # For first sample, use zero state (same as current state for delta transforms)
-                        sample_prev_state = np.zeros_like(current_state)
-                    else:
-                        sample_prev_state = prev_state
-                    
-                    # Extract the data for our sample format
-                    sample = {
-                        'sample_id': sample_idx,
-                        'sample_index_in_batch': i,
-                        'episode_source_id': episode_id,
-                        'state': current_state,
-                        'prev_state': sample_prev_state,
-                        'left_wrist_image': transformed_data["image"]["left_wrist_0_rgb"],
-                        'right_wrist_image': transformed_data["image"]["right_wrist_0_rgb"],
-                        'gt_actions': transformed_data["actions"],
-                        'prompt': transformed_data.get("prompt", "pick up object"),
-                        'raw_data': raw_data
-                    }
-                    
-                    # Update prev_state for next iteration
-                    prev_state = current_state
-                    
-                    samples.append(sample)
-                    print(f"Loaded sample {i+1}/{len(sample_indices)} (dataset index: {sample_idx})")
-                    
-                except Exception as e:
-                    print(f"Failed to load sample {sample_idx}: {e}")
-                    continue
+                #except Exception as e:
+                #    print(f"Failed to load sample {sample_idx}: {e}")
+                #    continue
                     
             print(f"Successfully loaded {len(samples)} samples from episode {episode_id}")
             return samples
@@ -202,11 +204,11 @@ class FlexivTrajectoryVisualizer:
             # Create dummy prev_state (zero state for delta transforms)
             state = example["observation/state"]
             prev_state = np.zeros_like(state)
-            
             sample = {
                 'sample_id': i,
                 'state': state,
                 'prev_state': prev_state,
+                "eye_image": example["observation/eye_image"],
                 'left_wrist_image': example["observation/left_wrist_image"],
                 'right_wrist_image': example["observation/right_wrist_image"],
                 'gt_actions': np.random.randn(self.config.model.action_horizon, 14) * 0.1,
@@ -221,6 +223,7 @@ class FlexivTrajectoryVisualizer:
         # Create input for inference
         obs_input = {
             "observation/state": sample['state'],
+            "observation/eye_image": sample['eye_image'],
             "observation/left_wrist_image": sample['left_wrist_image'],
             "observation/right_wrist_image": sample['right_wrist_image'],
             "prompt": sample['prompt']

@@ -1,9 +1,13 @@
 data:
-  - "/mnt/data/shenyibo/workspace/umi_base/.cache/q3_mouse_dh/replay_buffer.zarr"
+  - "/mnt/data/shenyibo/workspace/umi_base/.cache/q3_shop_bagging_0202/replay_buffer.zarr"
 task:
-  - "q3_mouse"
+  - "packsnack bimanual iphone and head quest3 zarr"
 features:
   left_wrist_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  right_wrist_img:
     dtype: "image"
     shape: [224, 224, 3]
     names: ["height", "width", "channel"]
@@ -17,9 +21,9 @@ features:
     names: ["height", "width", "channel"]
   state:
     dtype: "float32"
-    shape: [7,] 
+    shape: [14,] 
     names: ["state"]
   actions:
     dtype: "float32"
-    shape: [7,]
+    shape: [14,]
     names: ["actions"]
