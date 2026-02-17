@@ -21,6 +21,7 @@ import openpi.policies.aloha_policy as aloha_policy
 import openpi.policies.bimanual_flexiv_policy as bimanual_flexiv_policy
 import openpi.policies.async_biflexiv_policy as async_biflexiv_policy
 import openpi.policies.single_iphone_flexiv_policy as single_iphone_flexiv_policy
+import openpi.policies.single_iphone_vr_flexiv_policy as single_iphone_vr_flexiv_policy
 import openpi.policies.bimanual_iphone_flexiv_policy as bimanual_iphone_flexiv_policy
 import openpi.policies.bimanual_iphone_vr_flexiv_policy as bimanual_iphone_vr_flexiv_policy
 import openpi.policies.droid_policy as droid_policy
@@ -494,6 +495,42 @@ class LeRobotSingleiPhoneFlexivDataConfig(DataConfigFactory):
             model_transforms=model_transforms,
         )
 
+@dataclasses.dataclass(frozen=True)
+class LeRobotSingleiPhoneFlexivVRDataConfig(DataConfigFactory):
+
+    extra_delta_transform: bool = True
+
+    @override
+    def create(self, assets_dirs: pathlib.Path, model_config: _model.BaseModelConfig, *args, **kwargs) -> DataConfig:
+        repack_transform = _transforms.Group(
+            inputs=[
+                _transforms.RepackTransform(
+                    {
+                        "observation/state": "state",
+                        "observation/left_wrist_image": "left_wrist_img",
+                        "observation/eye_image": "eye_img",
+                        "actions": "actions",
+                        "prompt": "task",
+                    }
+                )
+            ]
+        )
+        data_transforms = _transforms.Group(
+            inputs=[single_iphone_vr_flexiv_policy.SingleiPhoneVRFlexivInputs(model_type=model_config.model_type)],
+            outputs=[single_iphone_vr_flexiv_policy.SingleiPhoneVRFlexivOutputs()],
+        )
+        model_transforms = ModelTransformFactory()(model_config)
+        if self.extra_delta_transform:
+            data_transforms = data_transforms.push(
+                inputs=[_transforms.iPhoneZeroStateAndRealRelativeActions(bimanual=False)],
+                outputs=[_transforms.iPhoneIdentityActions(bimanual=False)],
+            )
+        return dataclasses.replace(
+            self.create_base_config(assets_dirs, model_config),
+            repack_transforms=repack_transform,
+            data_transforms=data_transforms,
+            model_transforms=model_transforms,
+        )
 
 @dataclasses.dataclass(frozen=True)
 class LeRobotAlohaDataConfig(DataConfigFactory):
@@ -1118,6 +1155,27 @@ _CONFIGS = [
         model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False), # change chunk size here
         data=LeRobotSingleiPhoneFlexivDataConfig(
             repo_id="flexiv/pour_msg", # change dataset name here
+            base_config=DataConfig(prompt_from_task=True),
+            extra_delta_transform=True,
+        ),
+        batch_size=32,
+        lr_schedule=_optimizer.CosineDecaySchedule(
+            warmup_steps=10_000,
+            peak_lr=5e-5,
+            decay_steps=1_000_000,
+            decay_lr=5e-5,
+        ),
+        optimizer=_optimizer.AdamW(clip_gradient_norm=1.0),
+        ema_decay=0.999,
+        weight_loader=weight_loaders.CheckpointWeightLoader("gs://openpi-assets/checkpoints/pi05_base/params"),
+        pytorch_weight_path="/path/to/your/pytorch_weight_path",
+        num_train_steps=30_000,
+    ),
+    TrainConfig(
+        name="pi05_iPhoneVRSingle_mouse", # change config name here
+        model=pi0_config.Pi0Config(pi05=True, action_horizon=10, discrete_state_input=False), # change chunk size here
+        data=LeRobotSingleiPhoneFlexivVRDataConfig(
+            repo_id="flexiv/mouse", # change dataset name here
             base_config=DataConfig(prompt_from_task=True),
             extra_delta_transform=True,
         ),
