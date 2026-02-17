@@ -227,6 +227,35 @@ def action_mse_metrics(
     return metrics
 
 
+@at.typecheck
+def image_grad_metrics(
+    config: _config.TrainConfig,
+    rng: at.KeyArrayLike,
+    state: training_utils.TrainState,
+    batch: tuple[_model.Observation, _model.Actions],
+) -> dict[str, at.Array]:
+    model = nnx.merge(state.model_def, state.params)
+    model.train()
+
+    @at.typecheck
+    def loss_fn(
+        model: _model.BaseModel, rng: at.KeyArrayLike, observation: _model.Observation, actions: _model.Actions
+    ):
+        chunked_loss = model.compute_loss(rng, observation, actions, train=True)
+        return jnp.mean(chunked_loss)
+
+    train_rng = jax.random.fold_in(rng, state.step)
+    observation, actions = batch
+
+    def loss_wrt_obs(obs: _model.Observation) -> at.Array:
+        return loss_fn(model, train_rng, obs, actions)
+
+    obs_grads = jax.grad(loss_wrt_obs, allow_int=True)(observation)
+    return {
+        f"image_grad_norm/{key}": optax.global_norm(obs_grads.images[key]) for key in obs_grads.images
+    }
+
+
 def main(config: _config.TrainConfig):
     init_logging()
     logging.info(f"Running on: {platform.node()}")
@@ -283,8 +312,18 @@ def main(config: _config.TrainConfig):
         donate_argnums=(1,),
     )
 
+    enable_image_metrics = True
+    image_metrics_every = 1000
     enable_action_metrics = True
     action_metrics_every = 1000
+
+    pimage_metrics = None
+    if enable_image_metrics:
+        pimage_metrics = jax.jit(
+            functools.partial(image_grad_metrics, config),
+            in_shardings=(replicated_sharding, train_state_sharding, data_sharding),
+            out_shardings=replicated_sharding,
+        )
 
     paction_metrics = None
     if enable_action_metrics:
@@ -312,6 +351,10 @@ def main(config: _config.TrainConfig):
         if step % config.log_interval == 0:
             stacked_infos = common_utils.stack_forest(infos)
             reduced_info = jax.device_get(jax.tree.map(jnp.mean, stacked_infos))
+            if enable_image_metrics and pimage_metrics is not None and (step % image_metrics_every == 0):
+                image_metrics = jax.device_get(pimage_metrics(train_rng, train_state, batch))
+                image_metrics = jax.tree.map(lambda x: float(x), image_metrics)
+                reduced_info = {**reduced_info, **image_metrics}
             if enable_action_metrics and paction_metrics is not None and (step % action_metrics_every == 0):
                 action_metrics = jax.device_get(paction_metrics(train_rng, train_state, batch))
                 action_metrics = jax.tree.map(lambda x: float(x), action_metrics)
