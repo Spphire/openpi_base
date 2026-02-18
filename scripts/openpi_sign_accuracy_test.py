@@ -145,7 +145,9 @@ def main():
             delta_timestamps=delta_timestamps,
             episodes=[ep_idx]
         )
+        print(len(dataset))
         gripper_width = [raw_data['state'][-1] for raw_data in dataset]
+        
         window = find_closing_window(gripper_width)
         if window is None:
             print(f"Episode {ep_idx}: No closing window found, skipping.")
@@ -155,7 +157,6 @@ def main():
 
         repacked_data = {
             "observation/left_wrist_image": raw_data["left_wrist_img"],
-            "observation/right_wrist_image": raw_data["right_wrist_img"], 
             "observation/eye_image": raw_data["left_eye_img"],
             "observation/state": raw_data["state"],
             "actions": raw_data["actions"],
@@ -172,14 +173,10 @@ def main():
         
         # Extract the data for our sample format
         sample = {
-            'sample_id': sample_idx,
-            'sample_index_in_batch': i,
-            'episode_source_id': episode_id,
             'state': current_state,
             'prev_state': sample_prev_state,
             "eye_image": transformed_data["image"]["base_0_rgb"],
             'left_wrist_image': transformed_data["image"]["left_wrist_0_rgb"],
-            'right_wrist_image': transformed_data["image"]["right_wrist_0_rgb"],
             'gt_actions': transformed_data["actions"],
             'prompt': transformed_data.get("prompt", "pick up object"),
             'raw_data': raw_data
@@ -190,7 +187,6 @@ def main():
             "observation/state": sample['state'],
             "observation/eye_image": sample['eye_image'],
             "observation/left_wrist_image": sample['left_wrist_image'],
-            "observation/right_wrist_image": sample['right_wrist_image'],
             "prompt": sample['prompt']
         }
 
