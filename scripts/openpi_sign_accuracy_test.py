@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 from openpi.training import config as _config
 from openpi.policies import policy_config as _policy_config
 from openpi.shared import download
+from openpi.policies import single_iphone_vr_flexiv_policy
 
 def load_openpi_policy(config_name: str, checkpoint_path: str):
     """Load OpenPI policy from checkpoint."""
@@ -17,16 +18,35 @@ def load_openpi_policy(config_name: str, checkpoint_path: str):
     policy = _policy_config.create_trained_policy(config, checkpoint_path)
     return policy, config
 
-def load_openpi_dataset(dataset_path: str):
-    """Load OpenPI dataset in LeRobot-compatible format."""
-    dataset_path = pathlib.Path(dataset_path).expanduser().resolve()
-    if not dataset_path.exists():
-        raise FileNotFoundError(f"Dataset not found: {dataset_path}")
-    print(f"Loading OpenPI dataset from: {dataset_path}")
+def load_openpi_dataset_from_config(config, episode_id: int = 0):
+    """Load OpenPI dataset using repo_id and delta_timestamps."""
+    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset, LeRobotDatasetMetadata
 
-    # Load dataset using LeRobotDataset
-    from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
-    dataset = LeRobotDataset(dataset_path)
+    # Get repo_id from config
+    data_config = config.data.create(config.assets_dirs, config.model)
+    repo_id = data_config.repo_id
+    if not repo_id or repo_id == "fake":
+        raise ValueError("No valid repo_id found in config. Cannot load dataset.")
+
+    # Load dataset metadata
+    dataset_meta = LeRobotDatasetMetadata(repo_id)
+    action_horizon = config.model.action_horizon
+
+    # Create delta_timestamps based on fps and action_sequence_keys
+    delta_timestamps = {
+        key: [t / dataset_meta.fps for t in range(action_horizon)]
+        for key in data_config.action_sequence_keys
+    }
+
+    print(f"Dataset FPS: {dataset_meta.fps}, Action horizon: {action_horizon}")
+    print(f"Delta timestamps: {delta_timestamps}")
+
+    # Load dataset with specific episode
+    dataset = LeRobotDataset(
+        repo_id,
+        delta_timestamps=delta_timestamps,
+        episodes=[episode_id]
+    )
 
     episodes = {}
     for episode_id in range(len(dataset)):
@@ -83,14 +103,13 @@ def load_openpi_config_and_policy(config_name: str, checkpoint_path: str):
     policy = _policy_config.create_trained_policy(config, checkpoint_path)
     return config, policy
 
-def load_dataset_from_config(config):
-    """Load dataset path from configuration using repo_id."""
+def get_repoid_from_config(config):
+    """Load dataset path from configuration using repo_id and construct full path."""
     data_config = config.data.create(config.assets_dirs, config.model)
     repo_id = data_config.repo_id
     if not repo_id or repo_id == "fake":
         raise ValueError("No valid repo_id found in config. Cannot load dataset.")
-    print(f"Dataset repo_id: {repo_id}")
-    return repo_id
+    return data_config, repo_id
 
 def main():
     parser = argparse.ArgumentParser(description="OpenPI Sign Accuracy Evaluation")
@@ -103,31 +122,80 @@ def main():
     config, policy = load_openpi_config_and_policy(args.config, args.checkpoint)
 
     # Load dataset path from configuration
-    dataset_path = load_dataset_from_config(config)
-
-    # Load dataset
-    episodes = load_openpi_dataset(dataset_path)
+    data_config, repo_id = get_repoid_from_config(config)
+            
+    # Load dataset with proper delta_timestamps for action chunks
+    from lerobot.common.datasets.lerobot_dataset import LeRobotDatasetMetadata
+    
+    dataset_meta = LeRobotDatasetMetadata(repo_id)
+    action_horizon = config.model.action_horizon
+    
+    # Create delta_timestamps based on fps and action_sequence_keys
+    delta_timestamps = {
+        key: [t / dataset_meta.fps for t in range(action_horizon)] 
+        for key in data_config.action_sequence_keys
+    }
 
     results = []
-    for ep_idx, episode in episodes.items():
-        gripper_width = episode["gripper_width"]
+    for ep_idx in range(295):
+        dataset = LeRobotDataset(
+            repo_id, 
+            delta_timestamps=delta_timestamps,
+            episodes=[ep_idx]
+        )
+        gripper_width = [raw_data['state'][-1] for raw_data in dataset]
         window = find_closing_window(gripper_width)
         if window is None:
             print(f"Episode {ep_idx}: No closing window found, skipping.")
             continue
 
+        raw_data = dataset[window[-1]]
+
+        repacked_data = {
+            "observation/left_wrist_image": raw_data["left_wrist_img"],
+            "observation/right_wrist_image": raw_data["right_wrist_img"], 
+            "observation/eye_image": raw_data["left_eye_img"],
+            "observation/state": raw_data["state"],
+            "actions": raw_data["actions"],
+            "prompt": raw_data.get("task", "pick up object")
+        }
+
+        flexiv_inputs = single_iphone_vr_flexiv_policy.SingleiPhoneVRFlexivInputs(model_type=config.model.model_type)
+        # Apply transform (this handles the format conversion)
+        transformed_data = flexiv_inputs(repacked_data)
+        
+        # Use previous sample's state if available, otherwise use zero state
+        current_state = transformed_data["state"]
+        sample_prev_state = np.zeros_like(current_state)
+        
+        # Extract the data for our sample format
+        sample = {
+            'sample_id': sample_idx,
+            'sample_index_in_batch': i,
+            'episode_source_id': episode_id,
+            'state': current_state,
+            'prev_state': sample_prev_state,
+            "eye_image": transformed_data["image"]["base_0_rgb"],
+            'left_wrist_image': transformed_data["image"]["left_wrist_0_rgb"],
+            'right_wrist_image': transformed_data["image"]["right_wrist_0_rgb"],
+            'gt_actions': transformed_data["actions"],
+            'prompt': transformed_data.get("prompt", "pick up object"),
+            'raw_data': raw_data
+        }
+
         # Prepare observation
-        obs = {
-            "observation/state": episode["state"],
-            "observation/eye_image": episode["eye_image"],
-            "observation/left_wrist_image": episode["left_wrist_image"],
-            "observation/right_wrist_image": episode["right_wrist_image"],
+        obs_input = {
+            "observation/state": sample['state'],
+            "observation/eye_image": sample['eye_image'],
+            "observation/left_wrist_image": sample['left_wrist_image'],
+            "observation/right_wrist_image": sample['right_wrist_image'],
+            "prompt": sample['prompt']
         }
 
         # Run inference
-        result = policy.infer(obs)
+        result = policy.infer(obs_input)
         pred_actions = result["actions"]
-        gt_actions = episode["actions"]
+        gt_actions = raw_data["actions"]
 
         # Compute accuracy
         acc = compute_sign_accuracy(pred_actions, gt_actions, window)
