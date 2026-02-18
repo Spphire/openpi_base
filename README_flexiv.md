@@ -126,7 +126,7 @@ python scripts/train.py pi05_iPhoneVRBimanual_packsnackq3 --exp-name=packsnackq3
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 python scripts/train.py pi05_iPhoneVRBimanual_q3_shop_bagging_0202 --exp-name=q3_shop_bagging_0202_100 --overwrite
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 python scripts/train.py pi05_iPhoneVRBimanual_packsnackq3 --exp-name=packsnackq3_1-24 --overwrite
 
-CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 python scripts/train.py pi05_iPhoneVRSingle_q3_mouse --exp-name=q3mouse --overwrite
+CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7,0 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 python scripts/train.py pi05_iPhoneVRSingle_q3_mouse --exp-name=q3mouse --overwrite
 ```
 
 5. 可视化训练结果
@@ -138,4 +138,5 @@ python model_inference_visualization/visualize_inference.py -cfg pi05_iPhoneVRBi
 6. 训练中断resume
 ```shell
 python scripts/train.py pi05_pick1010all --exp-name=exp_pi05_1010_all --resume # config名称和实验名称保持相同
+CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7,0 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 python scripts/train.py pi05_iPhoneVRSingle_q3_mouse --exp-name=q3mouse --resume
 ```

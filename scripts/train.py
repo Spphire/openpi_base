@@ -317,9 +317,9 @@ def main(config: _config.TrainConfig):
     )
 
     enable_image_metrics = True
-    image_metrics_every = 1000
+    image_metrics_every = 100
     enable_action_metrics = True
-    action_metrics_every = 1000
+    action_metrics_every = 100
 
     pimage_metrics = None
     if enable_image_metrics:
