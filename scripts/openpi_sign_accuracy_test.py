@@ -147,6 +147,20 @@ def main():
         )
         print(len(dataset))
         gripper_width = [raw_data['state'][-1] for raw_data in dataset]
+        # Plot gripper width
+        import matplotlib.pyplot as plt
+        plt.figure(figsize=(10, 6))
+        plt.plot(gripper_width, label=f"Episode {ep_idx}")
+        plt.xlabel("Timestep")
+        plt.ylabel("Gripper Width")
+        plt.title(f"Gripper Width Over Time - Episode {ep_idx}")
+        plt.legend()
+        plt.grid(True)
+        plot_save_path = f"gripper_width_episode_{ep_idx}.png"
+        plt.savefig(plot_save_path)
+        plt.close()
+        print(f"Gripper width plot saved to {plot_save_path}")
+        quit()
         
         window = find_closing_window(gripper_width)
         if window is None:
