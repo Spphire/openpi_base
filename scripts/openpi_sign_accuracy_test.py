@@ -10,6 +10,8 @@ from openpi.training import config as _config
 from openpi.policies import policy_config as _policy_config
 from openpi.shared import download
 from openpi.policies import single_iphone_vr_flexiv_policy
+from lerobot.common.datasets.lerobot_dataset import LeRobotDataset
+
 
 def load_openpi_policy(config_name: str, checkpoint_path: str):
     """Load OpenPI policy from checkpoint."""
