@@ -114,7 +114,7 @@ def get_repoid_from_config(config):
 def main():
     parser = argparse.ArgumentParser(description="OpenPI Sign Accuracy Evaluation")
     parser.add_argument("--config", default='pi05_iPhoneVRSingle_q3_mouse', help="Configuration name for the policy")
-    parser.add_argument("--checkpoint", required=True, help="Path to model checkpoint")
+    parser.add_argument("--checkpoint", default='checkpoints/pi05_iPhoneVRSingle_q3_mouse/q3mouse_normal/29999', help="Path to model checkpoint")
     parser.add_argument("--output-csv", default="openpi_sign_accuracy.csv", help="Path to save results")
     args = parser.parse_args()
 
