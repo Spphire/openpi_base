@@ -84,13 +84,13 @@ def load_openpi_config_and_policy(config_name: str, checkpoint_path: str):
     return config, policy
 
 def load_dataset_from_config(config):
-    """Load dataset path and task name from configuration."""
+    """Load dataset path from configuration using repo_id."""
     data_config = config.data.create(config.assets_dirs, config.model)
-    dataset_path = data_config.repo_id
-    if not dataset_path:
-        raise ValueError("Dataset path not found in configuration.")
-    print(f"Dataset path: {dataset_path}")
-    return dataset_path
+    repo_id = data_config.repo_id
+    if not repo_id or repo_id == "fake":
+        raise ValueError("No valid repo_id found in config. Cannot load dataset.")
+    print(f"Dataset repo_id: {repo_id}")
+    return repo_id
 
 def main():
     parser = argparse.ArgumentParser(description="OpenPI Sign Accuracy Evaluation")
