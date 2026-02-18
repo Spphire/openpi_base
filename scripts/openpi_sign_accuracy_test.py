@@ -3,7 +3,7 @@ import pathlib
 import argparse
 import csv
 from typing import Optional, Tuple, List, Dict
-
+import torch
 import numpy as np
 import matplotlib.pyplot as plt
 from openpi.training import config as _config
@@ -63,40 +63,97 @@ def load_openpi_dataset_from_config(config, episode_id: int = 0):
         }
     return episodes
 
-def find_closing_window(gripper_width: np.ndarray, close_eps: float = 1e-4, min_len: int = 5) -> Optional[Tuple[int, int]]:
-    """Find the closing window based on gripper width."""
+def find_closing_window(
+    gripper_width: np.ndarray,
+    close_eps: float = 1e-4,
+    min_len: int = 5,
+    smooth_window: int = 5,
+    min_drop: float = 0.0,
+) -> Optional[Tuple[int, int]]:
     w = np.asarray(gripper_width).squeeze()
-    dw = np.diff(w)
+    if w.ndim != 1 or len(w) < 2:
+        return None
+
+    if smooth_window > 1:
+        kernel = np.ones(smooth_window, dtype=np.float32) / float(smooth_window)
+        w_smooth = np.convolve(w, kernel, mode="same")
+    else:
+        w_smooth = w
+
+    dw = np.diff(w_smooth)
     dec = dw < -close_eps
 
-    segments = []
+    segments: List[Tuple[int, int]] = []
     start = None
     for i, flag in enumerate(dec):
         if flag and start is None:
             start = i
-        if not flag and start is not None:
-            segments.append((start, i))
+        if (not flag) and start is not None:
+            segments.append((start, i - 1))
             start = None
     if start is not None:
         segments.append((start, len(dec) - 1))
 
+    if not segments:
+        return None
+
+    # filter by minimum drop
+    filtered_segments: List[Tuple[int, int, float]] = []
     for s, e in segments:
-        if e - s + 1 >= min_len:
-            return s, e
-    return None
+        end_idx = min(e + 1, len(w_smooth) - 1)
+        drop = float(w_smooth[s] - w_smooth[end_idx])
+        if drop >= min_drop:
+            filtered_segments.append((s, e, drop))
 
-def compute_sign_accuracy(pred_actions: np.ndarray, gt_actions: np.ndarray, window: Tuple[int, int]) -> float:
-    """Compute sign accuracy within the closing window."""
-    start, end = window
-    pred_x = pred_actions[start:end + 1, 0]
-    gt_x = gt_actions[start:end + 1, 0]
+    if not filtered_segments:
+        return None
 
-    valid = (np.abs(gt_x) > 1e-6) & (np.abs(pred_x) > 1e-6)
+    min_idx = int(np.argmin(w_smooth))
+    target = max(0, min_idx - 1)
+
+    def segment_score(seg):
+        s, e, drop = seg
+        if s <= target <= e:
+            return (0, -drop, abs(e - target))
+        return (1, -drop, abs(e - target))
+
+    filtered_segments.sort(key=segment_score)
+    seg_start, seg_end, _ = filtered_segments[0]
+
+    window_start = seg_start
+    window_end = seg_end + 1
+    window_end = min(window_end, len(w) - 1)
+
+    if window_end - window_start + 1 < min_len:
+        window_end = min(len(w) - 1, max(window_end, min_idx))
+        window_start = max(0, window_end - min_len + 1)
+
+    return window_start, window_end
+
+def compute_sign_accuracy(
+    pred_chunk: np.ndarray,
+    gt_actions_all: np.ndarray,
+    idx: int,
+    zero_eps: float = 1e-6,
+    relative: bool = False,
+) -> Tuple[float, int, int]:
+    if idx >= len(gt_actions_all):
+        return float("nan"), 0, 0
+    
+    end_idx = min(idx + pred_chunk.shape[0], len(gt_actions_all))
+
+    pred_x = pred_chunk[:end_idx-idx, 0]
+    gt_x = gt_actions_all[idx:end_idx, 0]
+    if relative:
+        gt_x -= gt_actions_all[idx-1, 0]
+
+    valid = (np.abs(gt_x) > zero_eps) & (np.abs(pred_x) > zero_eps)
     if valid.sum() == 0:
-        return float("nan")
+        return float("nan"), 0, 0
 
     correct = np.sign(pred_x[valid]) == np.sign(gt_x[valid])
-    return correct.mean()
+    acc = float(correct.mean())
+    return acc, int(correct.sum()), int(valid.sum())
 
 def load_openpi_config_and_policy(config_name: str, checkpoint_path: str):
     """Load OpenPI configuration and policy."""
@@ -137,35 +194,31 @@ def main():
         key: [t / dataset_meta.fps for t in range(action_horizon)] 
         for key in data_config.action_sequence_keys
     }
-
     results = []
     for ep_idx in range(295):
         dataset = LeRobotDataset(
             repo_id, 
-            delta_timestamps=delta_timestamps,
+            # delta_timestamps=delta_timestamps,
             episodes=[ep_idx]
         )
-        print(len(dataset))
         gripper_width = [raw_data['state'][-1] for raw_data in dataset]
-        # Plot gripper width
-        import matplotlib.pyplot as plt
-        plt.figure(figsize=(10, 6))
-        plt.plot(gripper_width, label=f"Episode {ep_idx}")
-        plt.xlabel("Timestep")
-        plt.ylabel("Gripper Width")
-        plt.title(f"Gripper Width Over Time - Episode {ep_idx}")
-        plt.legend()
-        plt.grid(True)
-        plot_save_path = f"gripper_width_episode_{ep_idx}.png"
-        plt.savefig(plot_save_path)
-        plt.close()
-        print(f"Gripper width plot saved to {plot_save_path}")
-        quit()
-        
+        gt_actions_all = torch.stack([raw_data['actions'] for raw_data in dataset])
+        # import matplotlib.pyplot as plt
+        # plt.figure(figsize=(10, 6))
+        # plt.plot(gripper_width, label=f"Episode {ep_idx}")
+        # plt.xlabel("Timestep")
+        # plt.ylabel("Gripper Width")
+        # plt.title(f"Gripper Width Over Time - Episode {ep_idx}")
+        # plt.legend()
+        # plt.grid(True)
+        # plot_save_path = f"gripper_width_episode_{ep_idx}.png"
+        # plt.savefig(plot_save_path)
+        # plt.close()
         window = find_closing_window(gripper_width)
         if window is None:
             print(f"Episode {ep_idx}: No closing window found, skipping.")
             continue
+        print(f"Episode {ep_idx}: Closing window found at indices {window}")
 
         raw_data = dataset[window[-1]]
 
@@ -207,10 +260,9 @@ def main():
         # Run inference
         result = policy.infer(obs_input)
         pred_actions = result["actions"]
-        gt_actions = raw_data["actions"]
 
         # Compute accuracy
-        acc = compute_sign_accuracy(pred_actions, gt_actions, window)
+        acc, _, _ = compute_sign_accuracy(pred_actions, gt_actions_all.numpy(), window[-1])
         print(f"Episode {ep_idx}: Sign accuracy = {acc:.4f}")
         results.append((ep_idx, acc))
 
