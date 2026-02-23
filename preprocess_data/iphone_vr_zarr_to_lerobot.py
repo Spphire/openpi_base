@@ -147,6 +147,7 @@ def convert_episode_to_lerobot_format(
     
     if robot_type == "single_iphone_vr_flexiv":
         state = left_state
+        state_withoutgripper = left_pose
     else:
         # Process right arm data for bimanual
         right_pose_9d = episode_data["right_robot_tcp_pose"]
@@ -157,8 +158,9 @@ def convert_episode_to_lerobot_format(
         right_gripper_width = episode_data["right_robot_gripper_width"]
         right_state = np.concatenate([right_pose, right_gripper_width], axis=1)
         state = np.concatenate([left_state, right_state], axis=1)
+        state_withoutgripper = np.concatenate([left_pose, right_pose], axis=1)
     
-    result["state"] = state.astype(np.float32)
+    result["state"] = state_withoutgripper.astype(np.float32)
     result["actions"] = state.astype(np.float32).copy()
 
     # Copy image data

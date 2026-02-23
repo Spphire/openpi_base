@@ -1,7 +1,7 @@
 data:
-  - "/mnt/data/shenyibo/workspace/umi_base/.cache/q3_mouse_dh/replay_buffer.zarr"
+  - "/mnt/data/shenyibo/workspace/umi_base/.cache/q3_mouse_dh_train/replay_buffer.zarr"
 task:
-  - "q3_mouse"
+  - "Pick up the mouse and place it on the black mouse pad"
 features:
   left_wrist_img:
     dtype: "image"
@@ -17,7 +17,7 @@ features:
     names: ["height", "width", "channel"]
   state:
     dtype: "float32"
-    shape: [7,] 
+    shape: [6,] 
     names: ["state"]
   actions:
     dtype: "float32"

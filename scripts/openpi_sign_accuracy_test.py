@@ -135,15 +135,16 @@ def compute_sign_accuracy(
     gt_actions_all: np.ndarray,
     idx: int,
     zero_eps: float = 1e-6,
-    relative: bool = False,
+    relative: bool = True,
 ) -> Tuple[float, int, int]:
     if idx >= len(gt_actions_all):
         return float("nan"), 0, 0
     
     end_idx = min(idx + pred_chunk.shape[0], len(gt_actions_all))
 
-    pred_x = pred_chunk[:end_idx-idx, 0]
-    gt_x = gt_actions_all[idx:end_idx, 0]
+    pred_x = pred_chunk[end_idx-idx-1:end_idx-idx, 0]
+    gt_x = gt_actions_all[end_idx-1:end_idx, 0]
+    
     if relative:
         gt_x -= gt_actions_all[idx-1, 0]
 
@@ -251,8 +252,9 @@ def main():
 
         # Prepare observation
         obs_input = {
-            "observation/state": sample['state'],
-            "observation/eye_image": sample['eye_image'],
+            "observation/state": np.zeros_like(sample['state']),
+            #"observation/eye_image": sample['eye_image'],
+            "observation/eye_image": np.zeros_like(sample['eye_image']),
             "observation/left_wrist_image": sample['left_wrist_image'],
             "prompt": sample['prompt']
         }
