@@ -17,7 +17,7 @@ features:
     names: ["height", "width", "channel"]
   state:
     dtype: "float32"
-    shape: [6,] 
+    shape: [7,] 
     names: ["state"]
   actions:
     dtype: "float32"

@@ -160,7 +160,7 @@ def convert_episode_to_lerobot_format(
         state = np.concatenate([left_state, right_state], axis=1)
         state_withoutgripper = np.concatenate([left_pose, right_pose], axis=1)
     
-    result["state"] = state_withoutgripper.astype(np.float32)
+    result["state"] = state.astype(np.float32)
     result["actions"] = state.astype(np.float32).copy()
 
     # Copy image data
