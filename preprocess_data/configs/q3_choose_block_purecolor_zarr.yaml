@@ -1,0 +1,25 @@
+data:
+  - "/mnt/data/shenyibo/workspace/umi_base/.cache/q3_choose_block_dh_purecolor/replay_buffer.zarr"
+task:
+  - "Select the cube that has the same color as the cube on the black mat on the left, and place it onto the mat"
+features:
+  left_wrist_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  left_eye_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  right_eye_img:
+    dtype: "image"
+    shape: [224, 224, 3]
+    names: ["height", "width", "channel"]
+  state:
+    dtype: "float32"
+    shape: [7,] 
+    names: ["state"]
+  actions:
+    dtype: "float32"
+    shape: [7,]
+    names: ["actions"]

@@ -117,6 +117,7 @@ _CONFIGS = [
 python scripts/compute_norm_stats.py --config-name pi05_iPhoneVRBimanual_packsnackq3 # 跟training config中定义的名称保持一致
 python scripts/compute_norm_stats.py --config-name pi05_iPhoneVRBimanual_q3_shop_bagging_0202
 python scripts/compute_norm_stats.py --config-name pi05_iPhoneVRSingle_q3_mouse
+python scripts/compute_norm_stats.py --config-name pi05_iPhoneVRSingle_q3_choose_block_purecolor
 ```
 
 4. 训练
@@ -127,6 +128,8 @@ CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 python s
 CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 python scripts/train.py pi05_iPhoneVRBimanual_packsnackq3 --exp-name=packsnackq3_1-24 --overwrite
 
 CUDA_VISIBLE_DEVICES=1,2,3,4,5,6,7,0 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 python scripts/train.py pi05_iPhoneVRSingle_q3_mouse --exp-name=q3mouse --overwrite
+
+CUDA_VISIBLE_DEVICES=0,1,2,3,4,5,6,7 XLA_PYTHON_CLIENT_MEM_FRACTION=0.9 python scripts/train.py pi05_iPhoneVRSingle_q3_choose_block --exp-name=q3_choose_block --overwrite
 ```
 
 5. 可视化训练结果

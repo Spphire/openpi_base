@@ -297,15 +297,14 @@ if __name__ == "__main__":
         "config_path",
         type=Path,
         nargs="?",
-        # default=Path("preprocess_data/configs/q3_shop_bagging_0202_100_zarr.yaml"),
-        default=Path("preprocess_data/configs/q3_mouse_zarr.yaml"),
+        default=Path("preprocess_data/configs/q3_stack_cup_zarr.yaml"),
         help="Path to the config YAML file (default: config0925.yaml)",
     )
     parser.add_argument(
         "repo_name",
         type=Path,
         nargs="?",
-        default=Path("q3_mouse"),
+        default=Path("q3_stack_cup"),
         help="the name of the dataset",
     )
     parser.add_argument(
